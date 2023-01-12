@@ -329,7 +329,7 @@ barbe.pipelines([{
             barbe.importComponent(
                 container,
                 "gcp_next_js",
-                "https://hub.barbe.app/barbe-ffront/gcp_project_setup/v0.1.0/.jsonnet",
+                "https://hub.barbe.app/anyfront/gcp_project_setup/v0.1.0/.jsonnet",
                 ["cr_[terraform]"],
                 forImport
             ),
@@ -347,7 +347,7 @@ barbe.pipelines([{
             barbe.importComponent(
                 container,
                 "gcp_next_js",
-                "https://hub.barbe.app/barbe-ffront/gcp_project_setup/v0.1.0/.jsonnet",
+                "https://hub.barbe.app/anyfront/gcp_project_setup/v0.1.0/.jsonnet",
                 ["cr_[terraform]"],
                 forImport
             ),
@@ -518,7 +518,7 @@ barbe.pipelines([{
             barbe.importComponent(
                 container,
                 "gcp_next_js",
-                "https://hub.barbe.app/barbe-ffront/gcp_project_setup/v0.1.0/.jsonnet",
+                "https://hub.barbe.app/anyfront/gcp_project_setup/v0.1.0/.jsonnet",
                 ["cr_[terraform]"],
                 forImport
             ),

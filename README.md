@@ -117,6 +117,15 @@ barbe apply infra.hcl --output dist
 4. Barbe/anyfront will do the rest, the first deployment usually takes a little longer, grab a drink!
 
 
+### Interested?
+
+Checkout the [docs](docs/README.md) and the [examples](examples/).
+
+You can also learn more about what you can do with Barbe in general:
+ - [Barbe-serverless getting started](https://github.com/Plenituz/barbe-serverless/blob/main/docs/getting-started.md)
+ - [`default` blocks](https://github.com/Plenituz/barbe-serverless/blob/main/docs/default-blocks.md)
+ - [Integrating existing projects](https://github.com/Plenituz/barbe-serverless/blob/main/docs/integrating-existing-projects.md)
+
 ### Known bugs:
 - Deleting/destroying a static_hosting block on GCP doesn't work (sorry! as a workaround you can manually delete in the GCP console: cloud run, load balancing, cloud DNS, or manually run `terraform destroy` in the directory created by `barbe generate/apply`)
 

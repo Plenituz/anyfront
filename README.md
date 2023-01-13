@@ -127,7 +127,7 @@ You can also learn more about what you can do with Barbe in general:
  - [Integrating existing projects](https://github.com/Plenituz/barbe-serverless/blob/main/docs/integrating-existing-projects.md)
 
 ### Known bugs:
-- Deleting/destroying a static_hosting block on GCP doesn't work (sorry! as a workaround you can manually delete in the GCP console: cloud run, load balancing, cloud DNS, or manually run `terraform destroy` in the directory created by `barbe generate/apply`)
+- Deleting/destroying a static_hosting block on GCP sometimes doesn't do anything (sorry! as a workaround you can manually delete in the GCP console: cloud run, load balancing, cloud DNS, or manually run `terraform destroy` in the directory created by `barbe generate/apply`)
 
 
 > Wanna chat? talk to me on twt @pinezul

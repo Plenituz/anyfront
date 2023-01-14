@@ -84,7 +84,7 @@ static_hosting "my-react-app-aws" {
 ## Getting started
 
 1. Install [barbe and docker](https://github.com/Plenituz/barbe/blob/main/docs/installation.md)
-2. Create an `infra.hcl` file at the root of your project (for other frameworks details may change, see [examples](examples/))
+2. Create an `infra.hcl` file at the root of your project, this is an example for Next.js on AWS (for other frameworks details may change, see [examples](examples/))
 ```hcl
 template {
     manifest = "https://hub.barbe.app/anyfront/manifest/v0.1.0/.json"
@@ -96,7 +96,7 @@ default {
     name_prefix = ["nextapp1-"]
 }
 
-# This tell barbe where to store your terraform and barbe state files
+# This tells barbe where to store your terraform and barbe state files
 state_store {
     s3 {}
 }
@@ -112,7 +112,7 @@ aws_next_js "my-site" {
 ```
 3. Run the deployment
 ```bash
-barbe apply infra.hcl --output dist
+barbe apply infra.hcl
 ```
 4. Barbe/anyfront will do the rest, the first deployment usually takes a little longer, grab a drink!
 
@@ -128,6 +128,3 @@ You can also learn more about what you can do with Barbe in general:
 
 ### Known bugs:
 - Deleting/destroying a static_hosting block on GCP sometimes doesn't do anything (sorry! as a workaround you can manually delete in the GCP console: cloud run, load balancing, cloud DNS, or manually run `terraform destroy` in the directory created by `barbe generate/apply`)
-
-
-> Wanna chat? talk to me on twt @pinezul

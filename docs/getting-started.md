@@ -30,7 +30,7 @@ aws_next_js "my-site" {
 ```
 3. Run the deployment
 ```bash
-barbe apply infra.hcl --output dist
+barbe apply infra.hcl
 ```
 4. Barbe/anyfront will do the rest, the first deployment usually takes a little longer, grab a drink!
 

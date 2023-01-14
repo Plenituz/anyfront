@@ -24,7 +24,7 @@ domain_project_id = "barbe-website"
 You can then run
 ```bash
 # sudo might or might not be necessary depending on your docker setup
-sudo barbe apply infra.hcl --output dist
+sudo barbe apply infra.hcl
 ```
 
 This will:
@@ -39,5 +39,5 @@ This will:
 
 Then to tear down all the infrastructure created
 ```bash
-sudo barbe destroy infra.hcl --output dist
+sudo barbe destroy infra.hcl
 ```

@@ -17,7 +17,7 @@ domain {
 You can then run
 ```bash
 # sudo might or might not be necessary depending on your docker setup
-sudo barbe apply infra.hcl --output dist
+sudo barbe apply infra.hcl
 ```
 
 This will:
@@ -29,7 +29,7 @@ This will:
 
 Then to tear down all the infrastructure created
 ```bash
-sudo barbe destroy infra.hcl --output dist
+sudo barbe destroy infra.hcl
 ```
 
 > Note: When destroying the template the first time most resources will be deleted but the terraform execution will fail. This is due to how Lambda@Edge deletions work: there is a background process that AWS has to run once it detects our Cloudfront distribution has been deleted, this might take a few minutes to an hour. You can re-run the `destroy` command after a while to finish the deletion

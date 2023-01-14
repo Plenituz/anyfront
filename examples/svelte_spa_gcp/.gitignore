@@ -5,7 +5,7 @@ node_modules
 /package
 .env.*
 !.env.example
-dist/
+barbe_dist/
 
 # generated markdown previews
 README.html

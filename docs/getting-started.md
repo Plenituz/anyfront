@@ -5,7 +5,7 @@
 2. Create an `infra.hcl` file at the root of your project (for other frameworks details may change, see [examples](examples/))
 ```hcl
 template {
-    manifest = "https://hub.barbe.app/anyfront/manifest/v0.1.0/.json"
+    manifest = "https://hub.barbe.app/anyfront/manifest/v0.1.1/.json"
 }
 
 aws_next_js "my-site" {
@@ -36,7 +36,7 @@ Let's add the a `default` block and a `name_prefix`
 
 ```hcl
 template {
-    manifest = "https://hub.barbe.app/anyfront/manifest/v0.1.0/.json"
+    manifest = "https://hub.barbe.app/anyfront/manifest/v0.1.1/.json"
 }
 
 default {
@@ -59,7 +59,7 @@ If you were to deploy this template, it would create a completely new website wi
 
 ```hcl
 template {
-    manifest = "https://hub.barbe.app/anyfront/manifest/v0.1.0/.json"
+    manifest = "https://hub.barbe.app/anyfront/manifest/v0.1.1/.json"
 }
 
 default {

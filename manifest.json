@@ -3,8 +3,8 @@
         "https://hub.barbe.app/barbe-serverless/manifest/v0.1.0/.json"
     ],
     "components": [
-        "https://hub.barbe.app/anyfront/static_hosting/v0.1.0/.jsonnet",
-        "https://hub.barbe.app/anyfront/aws_next_js/v0.1.0/.jsonnet",
-        "https://hub.barbe.app/anyfront/gcp_next_js/v0.1.0/.jsonnet"
+        "https://hub.barbe.app/anyfront/static_hosting/v0.1.1/.jsonnet",
+        "https://hub.barbe.app/anyfront/aws_next_js/v0.1.1/.jsonnet",
+        "https://hub.barbe.app/anyfront/gcp_next_js/v0.1.1/.jsonnet"
     ]
 }

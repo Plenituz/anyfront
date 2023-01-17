@@ -87,7 +87,7 @@ static_hosting "my-react-app-aws" {
 2. Create an `infra.hcl` file at the root of your project, this is an example for Next.js on AWS (for other frameworks details may change, see [examples](examples/))
 ```hcl
 template {
-    manifest = "https://hub.barbe.app/anyfront/manifest/v0.1.0/.json"
+    manifest = "https://hub.barbe.app/anyfront/manifest/v0.1.1/.json"
 }
 
 aws_next_js "my-site" {

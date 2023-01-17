@@ -87,14 +87,14 @@ local deploySteps = function(container) barbe.databags(
         barbe.importComponent(
             container,
             "static_hosting",
-            "https://hub.barbe.app/anyfront/gcp_cloudrun_static_hosting/v0.1.0/.jsonnet",
+            "https://hub.barbe.app/anyfront/gcp_cloudrun_static_hosting/v0.1.1/.jsonnet",
             ["default", "cr_[terraform]", "gcp_project_setup_output"],
             [bag for bag in barbe.flatten(mix) if bag.Type == "gcp_cloudrun_static_hosting"]
         ),
         barbe.importComponent(
             container,
             "static_hosting",
-            "https://hub.barbe.app/anyfront/aws_cloudfront_static_hosting/v0.1.0/.jsonnet",
+            "https://hub.barbe.app/anyfront/aws_cloudfront_static_hosting/v0.1.1/.jsonnet",
             ["default", "cr_[terraform]"],
             [bag for bag in barbe.flatten(mix) if bag.Type == "aws_cloudfront_static_hosting"]
         ),
@@ -198,7 +198,7 @@ barbe.pipelines([{
                 barbe.importComponent(
                     container,
                     "static_hosting",
-                    "https://hub.barbe.app/anyfront/frontend_build/v0.1.0/.jsonnet",
+                    "https://hub.barbe.app/anyfront/frontend_build/v0.1.1/.jsonnet",
                     [],
                     [bag for bag in mix if bag.Type == "frontend_build"]
                 ),

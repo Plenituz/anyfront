@@ -634,7 +634,7 @@ barbe.pipelines([{
                 barbe.importComponent(
                     container,
                     "aws_next_js",
-                    "https://hub.barbe.app/anyfront/aws_s3_sync_files/v0.1.0/.jsonnet",
+                    "https://hub.barbe.app/anyfront/aws_s3_sync_files/v0.1.1/.jsonnet",
                     [],
                     forImport
                 )

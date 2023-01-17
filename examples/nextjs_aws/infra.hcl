@@ -3,19 +3,15 @@ template {
 }
 
 default {
-  name_prefix = ["nextapp1-"]
-}
-
-state_store {
-  s3 {}
+    name_prefix = ["my-company-${env.STAGE}-"]
 }
 
 aws_next_js "my-site" {
     domain {
-        # the domain name you want the app to be under
-        name = "nextapp1.maplecone.com"
-        # the name of the existing DNS zone on your AWS account
-        zone = "maplecone.com"
+        # Note the conditional operator:
+        # if STAGE is prod, domain name will be nextapp1.anyfront.dev
+        # otherwise it will be nextapp1-${STAGE}.anyfront.dev
+        name = "nextapp1${env.STAGE == "prod" ? "" : "-${env.STAGE}"}.anyfront.dev"
+        zone = "anyfront.dev"
     }
 }
-

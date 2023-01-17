@@ -1,5 +1,7 @@
 # GCP React Single Page App example
 
+The only Anyfront-related file in this folder is `infra.hcl`.
+
 This folder shows an example of a static svelte project deployed on GCP using anyfront. (this example project is from [jira_clone](https://github.com/oldboyxx/jira_clone/tree/master/client))
 
 Before you can deploy this example on your GCP account make sure you:

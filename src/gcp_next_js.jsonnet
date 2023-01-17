@@ -53,6 +53,36 @@ local gcpProjectSetup(bagName, fullBlock, namePrefix) = {
 };
 
 barbe.pipelines([{
+    pre_generate: [
+        function(container) barbe.databags([
+            barbe.iterateBlocks(container, "gcp_next_js", function(bag)
+                local block = barbe.asVal(bag.Value);
+                local blockDefaults = barbe.makeBlockDefault(container, globalDefaults, block);
+                local fullBlock = barbe.asVal(barbe.mergeTokens([barbe.asSyntax(blockDefaults), bag.Value]));
+                local namePrefix = barbe.concatStrArr(std.get(fullBlock, "name_prefix", barbe.asSyntax([""])));
+
+                if !std.objectHas(container, "state_store") then
+                    {
+                       Name: "",
+                       Type: "state_store",
+                       Value: {
+                           name_prefix: [
+                                if !std.objectHas(fullBlock, "name_prefix") then
+                                    barbe.appendToTemplate(namePrefix, [bag.Name + "-"])
+                                else
+                                    namePrefix
+                           ],
+                           gcs: barbe.asBlock([{
+                                project_id: std.get(fullBlock, "project_id", null),
+                           }])
+                       }
+                   }
+                else
+                    []
+            )
+
+        ])
+    ],
     generate: [
         function(container) barbe.databags([
             barbe.iterateBlocks(container, "gcp_next_js", function(bag)

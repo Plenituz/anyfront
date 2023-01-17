@@ -2,15 +2,7 @@ template {
   manifest = "../../manifest.json"
 }
 
-default {
-  name_prefix = ["react-spa1-"]
-}
-
-state_store {
-  s3 {}
-}
-
-static_hosting "my-site" {
+static_hosting "my-react-spa-site" {
     platform = "aws"
 
     build {

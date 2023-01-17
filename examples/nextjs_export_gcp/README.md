@@ -1,5 +1,7 @@
 # GCP Next.js example
 
+The only Anyfront-related file in this folder is `infra.hcl`.
+
 This folder shows an example of a static Next.js project deployed on GCP using anyfront. (this example project is from [open-next](https://github.com/serverless-stack/open-next/tree/main/example))
 
 > Note: This example is using `next export`, so some of the Next.js features won't be fully working

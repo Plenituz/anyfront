@@ -102,6 +102,54 @@ local deploySteps = function(container) barbe.databags(
 );
 
 barbe.pipelines([{
+    pre_generate: [function(container) barbe.databags([
+        barbe.iterateBlocks(container, "static_hosting", function(bag)
+            local block = barbe.asVal(bag.Value);
+            local blockDefaults = barbe.makeBlockDefault(container, globalDefaults, block);
+            local fullBlock = barbe.asVal(barbe.mergeTokens([barbe.asSyntax(blockDefaults), bag.Value]));
+            local namePrefix = barbe.concatStrArr(std.get(fullBlock, "name_prefix", barbe.asSyntax([""])));
+            local platform = barbe.asStr(std.get(fullBlock, "platform", "aws"));
+            local dotGcpProject = barbe.asVal(barbe.mergeTokens(std.get(fullBlock, "google_cloud_project", barbe.asSyntax([])).ArrayConst));
+            [
+                if platform == "gcp" then
+                    if !std.objectHas(container, "state_store") then
+                        {
+                            Name: "",
+                            Type: "state_store",
+                            Value: {
+                                name_prefix: [
+                                    if !std.objectHas(fullBlock, "name_prefix") then
+                                        barbe.appendToTemplate(namePrefix, [bag.Name + "-"])
+                                    else
+                                        namePrefix
+                                ],
+                                gcs: barbe.asBlock([{
+                                    project_id: std.get(dotGcpProject, "project_id", std.get(fullBlock, "google_cloud_project_id", null)),
+                                }])
+                            }
+                        }
+                    else []
+                else if platform == "aws" then
+                    if !std.objectHas(container, "state_store") then
+                        {
+                            Name: "",
+                            Type: "state_store",
+                            Value: {
+                                name_prefix: [
+                                    if !std.objectHas(fullBlock, "name_prefix") then
+                                        barbe.appendToTemplate(namePrefix, [bag.Name + "-"])
+                                    else
+                                        namePrefix
+                                ],
+                                s3: barbe.asBlock([{}])
+                            }
+                        }
+                    else []
+                else
+                    error "<showuser>Unknown platform '" + platform + "'</showuser>"
+            ]
+        )
+    ])],
     generate: [
         function(container) barbe.databags(
             local staticHostingBags = barbe.iterateBlocks(container, "static_hosting", function(bag) bag);

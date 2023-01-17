@@ -258,7 +258,7 @@ local staticFileDistribAWS(opt) =
                 name: opt.zone
             }),
             [
-                cloudResource("aws_route53_record", "aws_http_api_domain_record", {
+                cloudResource("aws_route53_record", "cf_distrib_domain_record", {
                     zone_id: barbe.asTraversal("data.aws_route53_zone.zone.zone_id"),
                     name: domainName,
                     type: "CNAME",

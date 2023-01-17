@@ -77,6 +77,34 @@ local acmCertificateResources(opt) = [
 ];
 
 barbe.pipelines([{
+    pre_generate: [
+        function(container) barbe.databags([
+            barbe.iterateBlocks(container, "aws_next_js", function(bag)
+                local block = barbe.asVal(bag.Value);
+                local blockDefaults = barbe.makeBlockDefault(container, globalDefaults, block);
+                local fullBlock = barbe.asVal(barbe.mergeTokens([barbe.asSyntax(blockDefaults), bag.Value]));
+                local namePrefix = barbe.concatStrArr(std.get(fullBlock, "name_prefix", barbe.asSyntax([""])));
+
+                if !std.objectHas(container, "state_store") then
+                    {
+                       Name: "",
+                       Type: "state_store",
+                       Value: {
+                           name_prefix: [
+                                if !std.objectHas(fullBlock, "name_prefix") then
+                                    barbe.appendToTemplate(namePrefix, [bag.Name + "-"])
+                                else
+                                    namePrefix
+                           ],
+                           s3: barbe.asBlock([{}])
+                       }
+                   }
+                else
+                    []
+            )
+
+        ])
+    ],
     generate: [
         function(container) barbe.databags([
             barbe.iterateBlocks(container, "aws_next_js", function(bag)
@@ -519,7 +547,7 @@ barbe.pipelines([{
                                 name: dotDomain.zone
                             }),
                             [
-                                cloudResource("aws_route53_record", "aws_http_api_domain_record", {
+                                cloudResource("aws_route53_record", "cf_distrib_domain_record", {
                                     zone_id: barbe.asTraversal("data.aws_route53_zone.zone.zone_id"),
                                     name: domainName,
                                     type: "CNAME",

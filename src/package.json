@@ -1,0 +1,15 @@
+{
+  "name": "src",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {},
+  "keywords": [],
+  "author": "",
+  "dependencies": {
+    "esbuild": "0.17.0",
+    "md5": "^2.3.0"
+  },
+  "devDependencies": {
+    "@types/md5": "^2.3.2"
+  }
+}

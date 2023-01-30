@@ -1,7 +1,7 @@
 import { readDatabagContainer, barbeLifecycleStep, exportDatabags, iterateBlocks, Databag, SugarCoatedDatabag, asTraversal, asFuncCall, asValArrayConst, asBlock, visitTokens, SyntaxToken, BarbeState, barbeOutputDir, importComponents, asVal, DatabagContainer } from '../../barbe-serverless/src/barbe-std/utils';
 import { applyDefaults, preConfCloudResourceFactory } from '../../barbe-serverless/src/barbe-sls-lib/lib';
 import { GCP_PROJECT_SETUP, TERRAFORM_EXECUTE_URL } from './anyfront-lib/consts';
-import { emptyExecuteTemplate, emptyExecuteBagNamePrefix, prependTfStateFileName } from './anyfront-lib/lib';
+import { emptyExecuteTemplate, emptyExecuteBagNamePrefix, prependTfStateFileName, emptyExecutePostProcess } from './anyfront-lib/lib';
 
 const container = readDatabagContainer()
 const state = BarbeState.readState()
@@ -160,30 +160,6 @@ function makeEmptyExecuteDatabags(): SugarCoatedDatabag[] {
     return emptyExecuteTemplate(container, state, GCP_PROJECT_SETUP, CREATED_TF_STATE_KEY)
 }
 
-function emptyExecutePostProcess(results: DatabagContainer): SugarCoatedDatabag[] {
-    if(!results.terraform_empty_execute_output) {
-        return []
-    }
-    let output: SugarCoatedDatabag[] = []
-    const prefix = emptyExecuteBagNamePrefix(CREATED_TF_STATE_KEY)
-    for(const prefixedName of Object.keys(results.terraform_empty_execute_output)) {
-        if(!prefixedName.startsWith(prefix)) {
-            continue
-        }
-        //this is the bag.Name of the gcp_project_setup
-        const nonPrefixedName = prefixedName.replace(prefix, '')
-        if(container?.gcp_project_setup?.[nonPrefixedName]) {
-            //just making sure just in case something went wrong
-            continue
-        }
-        output.push(
-            BarbeState.deleteFromObject(CREATED_TF_STATE_KEY, nonPrefixedName),
-            BarbeState.deleteFromObject(CREATED_PROJECT_NAME_KEY, nonPrefixedName),
-        )
-    }
-    return output
-}
-
 function gcpProjectSetupApply() {
     const results = importComponents(container, [{
         name: 'gcp_project_setup_apply',
@@ -220,7 +196,8 @@ function gcpProjectSetupApply() {
     }
 
     let databags: SugarCoatedDatabag[] = [
-        ...emptyExecutePostProcess(results),
+        ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_TF_STATE_KEY),
+        ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_PROJECT_NAME_KEY),
         ...alreadyDeployedProjectOutput,
     ]
     if(results.terraform_execute_output) {
@@ -268,7 +245,8 @@ function gcpProjectSetupDestroy() {
     }
 
     let databags: SugarCoatedDatabag[] = [
-        ...emptyExecutePostProcess(results),
+        ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_TF_STATE_KEY),
+        ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_PROJECT_NAME_KEY),
         //we keep that in case the calling template uses it, even tho it just got destroyed
         ...alreadyDeployedProjectOutput,
         ...iterateBlocks(container, GCP_PROJECT_SETUP, destroyProcessResultsIterator).flat(),

@@ -581,6 +581,10 @@
   var AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam/${BARBE_SLS_VERSION}/.js`;
   var AWS_LAMBDA_URL = `https://hub.barbe.app/barbe-serverless/aws_function/${BARBE_SLS_VERSION}/.js`;
   var GCP_PROJECT_SETUP_URL = `https://hub.barbe.app/anyfront/gcp_project_setup/${ANYFRONT_VERSION}/.js`;
+  var AWS_S3_SYNC_URL = `https://hub.barbe.app/anyfront/aws_s3_sync_files/${ANYFRONT_VERSION}/.js`;
+  var FRONTEND_BUILD_URL = `https://hub.barbe.app/anyfront/frontend_build/${ANYFRONT_VERSION}/.js`;
+  var GCP_CLOUDRUN_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/gcp_cloudrun_static_hosting/${ANYFRONT_VERSION}/.js`;
+  var AWS_CLOUDFRONT_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/aws_cloudfront_static_hosting/${ANYFRONT_VERSION}/.js`;
 
   // anyfront-lib/lib.ts
   function emptyExecuteBagNamePrefix(stateKey) {
@@ -620,6 +624,24 @@
           })
         }
       });
+    }
+    return output;
+  }
+  function emptyExecutePostProcess(container2, results, blockType, stateKey) {
+    if (!results.terraform_empty_execute_output) {
+      return [];
+    }
+    let output = [];
+    const prefix = emptyExecuteBagNamePrefix(stateKey);
+    for (const prefixedName of Object.keys(results.terraform_empty_execute_output)) {
+      if (!prefixedName.startsWith(prefix)) {
+        continue;
+      }
+      const nonPrefixedName = prefixedName.replace(prefix, "");
+      if (container2?.[blockType]?.[nonPrefixedName]) {
+        continue;
+      }
+      output.push(BarbeState.deleteFromObject(stateKey, nonPrefixedName));
     }
     return output;
   }
@@ -669,24 +691,6 @@ CMD sh -c "nginx -g 'daemon off;'"`;
       return [];
     }
     return emptyExecuteTemplate(container2, state2, GCP_CLOUDRUN_STATIC_HOSTING, CREATED_TF_STATE_KEY);
-  }
-  function emptyExecutePostProcess(results) {
-    if (!results.terraform_empty_execute_output) {
-      return [];
-    }
-    let output = [];
-    const prefix = emptyExecuteBagNamePrefix(CREATED_TF_STATE_KEY);
-    for (const prefixedName of Object.keys(results.terraform_empty_execute_output)) {
-      if (!prefixedName.startsWith(prefix)) {
-        continue;
-      }
-      const nonPrefixedName = prefixedName.replace(prefix, "");
-      if (container?.gcp_cloudrun_static_hosting?.[nonPrefixedName]) {
-        continue;
-      }
-      output.push(BarbeState.deleteFromObject(CREATED_TF_STATE_KEY, nonPrefixedName));
-    }
-    return output;
   }
   function makeGcpProjectSetupImport(bag, block, namePrefix) {
     return {
@@ -1033,7 +1037,7 @@ CMD sh -c "nginx -g 'daemon off;'"`;
     }
     const gcpProjectSetupResults = importComponents(container, step0Import);
     const step1 = iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, applyIteratorStep2(gcpProjectSetupResults)).flat();
-    exportDatabags(emptyExecutePostProcess(gcpProjectSetupResults));
+    exportDatabags(emptyExecutePostProcess(container, gcpProjectSetupResults, GCP_CLOUDRUN_STATIC_HOSTING, CREATED_TF_STATE_KEY));
     applyTransformers(step1.map((db) => db.databags).flat());
     const terraformExecuteResults = importComponents(container, step1.map((db) => db.imports).flat());
     applyTransformers(iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, applyIteratorStep3(gcpProjectSetupResults, terraformExecuteResults)).flat());
@@ -1088,7 +1092,7 @@ CMD sh -c "nginx -g 'daemon off;'"`;
       });
     }
     const gcpProjectSetupResults = importComponents(container, step0Import);
-    exportDatabags(emptyExecutePostProcess(gcpProjectSetupResults));
+    exportDatabags(emptyExecutePostProcess(container, gcpProjectSetupResults, GCP_CLOUDRUN_STATIC_HOSTING, CREATED_TF_STATE_KEY));
     importComponents(container, iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIterator2(gcpProjectSetupResults)).flat());
     exportDatabags(iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIterator3).flat());
   }

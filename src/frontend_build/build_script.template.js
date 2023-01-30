@@ -159,6 +159,7 @@ async function main() {
 
     let buildOutputDir = givenBuildOutputDir;
     if(!givenBuildOutputDir) {
+        //give time for the watcher to catch up
         await wait(5000)
         if (Object.keys(changedFiles).length === 0) {
             let dirsPostBuild = fs.readdirSync('.').filter(f => fs.statSync(f).isDirectory())

@@ -1,7 +1,7 @@
 import { applyDefaults, preConfCloudResourceFactory, applyMixins, getGcpToken, DatabagObjVal } from '../../../barbe-serverless/src/barbe-sls-lib/lib';
 import { readDatabagContainer, Databag, barbeLifecycleStep, exportDatabags, iterateBlocks, SugarCoatedDatabag, asTraversal, appendToTemplate, asTemplate, asBlock, ImportComponentInput, importComponents, appendToTraversal, barbeOutputDir, asStr, SyntaxToken, DatabagContainer, applyTransformers, asVal, BarbeState, asValArrayConst } from '../../../barbe-serverless/src/barbe-std/utils';
 import { GCP_CLOUDRUN_STATIC_HOSTING, GCP_PROJECT_SETUP, GCP_PROJECT_SETUP_URL, TERRAFORM_EXECUTE_URL } from '../anyfront-lib/consts';
-import { DBAndImport, emptyExecuteBagNamePrefix, emptyExecuteTemplate, prependTfStateFileName } from '../anyfront-lib/lib';
+import { DBAndImport, emptyExecuteBagNamePrefix, emptyExecutePostProcess, emptyExecuteTemplate, prependTfStateFileName } from '../anyfront-lib/lib';
 import lister_go from './lister.go';
 import nginx_conf from './nginx.conf';
 import nginx_dockerfile from './Dockerfile.dockerfile';
@@ -20,27 +20,6 @@ function makeEmptyExecuteDatabags(container: DatabagContainer, state: any): Suga
     //because this component gets called multiple times with no real input
     //and we dont want to delete the gcp_project_setup everytime that happens
     return emptyExecuteTemplate(container, state, GCP_CLOUDRUN_STATIC_HOSTING, CREATED_TF_STATE_KEY)
-}
-
-function emptyExecutePostProcess(results: DatabagContainer): SugarCoatedDatabag[] {
-    if(!results.terraform_empty_execute_output) {
-        return []
-    }
-    let output: SugarCoatedDatabag[] = []
-    const prefix = emptyExecuteBagNamePrefix(CREATED_TF_STATE_KEY)
-    for(const prefixedName of Object.keys(results.terraform_empty_execute_output)) {
-        if(!prefixedName.startsWith(prefix)) {
-            continue
-        }
-        //this is the bag.Name of the gcp_cloudrun_static_hosting
-        const nonPrefixedName = prefixedName.replace(prefix, '')
-        if(container?.gcp_cloudrun_static_hosting?.[nonPrefixedName]) {
-            //just making sure just in case something went wrong
-            continue
-        }
-        output.push(BarbeState.deleteFromObject(CREATED_TF_STATE_KEY, nonPrefixedName))
-    }
-    return output
 }
 
 function makeGcpProjectSetupImport(bag: Databag, block: DatabagObjVal, namePrefix: SyntaxToken): ImportComponentInput {
@@ -404,7 +383,7 @@ function apply() {
     const step1 = iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, applyIteratorStep2(gcpProjectSetupResults)).flat()
 
     //this removes all the deleted block from the state
-    exportDatabags(emptyExecutePostProcess(gcpProjectSetupResults))
+    exportDatabags(emptyExecutePostProcess(container, gcpProjectSetupResults, GCP_CLOUDRUN_STATIC_HOSTING, CREATED_TF_STATE_KEY))
     //transform first, this is the image builds which are needed for the cloudrun deployment
     applyTransformers(step1.map(db => db.databags).flat())
     //this the terraform apply
@@ -467,7 +446,7 @@ function destroy() {
 
     const gcpProjectSetupResults = importComponents(container, step0Import)
 
-    exportDatabags(emptyExecutePostProcess(gcpProjectSetupResults))
+    exportDatabags(emptyExecutePostProcess(container, gcpProjectSetupResults, GCP_CLOUDRUN_STATIC_HOSTING, CREATED_TF_STATE_KEY))
     importComponents(container, iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIterator2(gcpProjectSetupResults)).flat())
     exportDatabags(iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIterator3).flat())
 }

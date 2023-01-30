@@ -49,6 +49,27 @@ export function emptyExecuteTemplate(container: DatabagContainer, state: any, bl
     return output
 }
 
+export function emptyExecutePostProcess(container: DatabagContainer, results: DatabagContainer, blockType: string, stateKey: string): SugarCoatedDatabag[] {
+    if(!results.terraform_empty_execute_output) {
+        return []
+    }
+    let output: SugarCoatedDatabag[] = []
+    const prefix = emptyExecuteBagNamePrefix(stateKey)
+    for(const prefixedName of Object.keys(results.terraform_empty_execute_output)) {
+        if(!prefixedName.startsWith(prefix)) {
+            continue
+        }
+        //this is the bag.Name of the gcp_cloudrun_static_hosting
+        const nonPrefixedName = prefixedName.replace(prefix, '')
+        if(container?.[blockType]?.[nonPrefixedName]) {
+            //just making sure just in case something went wrong
+            continue
+        }
+        output.push(BarbeState.deleteFromObject(stateKey, nonPrefixedName))
+    }
+    return output
+}
+
 export function prependTfStateFileName(container: DatabagContainer, prefix: string): SyntaxToken {
     const visitor = (token: SyntaxToken): SyntaxToken | null => {
         if(token.Type === 'literal_value' && typeof token.Value === 'string' && token.Value.includes('.tfstate')) {

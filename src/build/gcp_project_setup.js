@@ -531,6 +531,10 @@
   var AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam/${BARBE_SLS_VERSION}/.js`;
   var AWS_LAMBDA_URL = `https://hub.barbe.app/barbe-serverless/aws_function/${BARBE_SLS_VERSION}/.js`;
   var GCP_PROJECT_SETUP_URL = `https://hub.barbe.app/anyfront/gcp_project_setup/${ANYFRONT_VERSION}/.js`;
+  var AWS_S3_SYNC_URL = `https://hub.barbe.app/anyfront/aws_s3_sync_files/${ANYFRONT_VERSION}/.js`;
+  var FRONTEND_BUILD_URL = `https://hub.barbe.app/anyfront/frontend_build/${ANYFRONT_VERSION}/.js`;
+  var GCP_CLOUDRUN_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/gcp_cloudrun_static_hosting/${ANYFRONT_VERSION}/.js`;
+  var AWS_CLOUDFRONT_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/aws_cloudfront_static_hosting/${ANYFRONT_VERSION}/.js`;
 
   // anyfront-lib/lib.ts
   function emptyExecuteBagNamePrefix(stateKey) {
@@ -570,6 +574,24 @@
           })
         }
       });
+    }
+    return output;
+  }
+  function emptyExecutePostProcess(container2, results, blockType, stateKey) {
+    if (!results.terraform_empty_execute_output) {
+      return [];
+    }
+    let output = [];
+    const prefix = emptyExecuteBagNamePrefix(stateKey);
+    for (const prefixedName of Object.keys(results.terraform_empty_execute_output)) {
+      if (!prefixedName.startsWith(prefix)) {
+        continue;
+      }
+      const nonPrefixedName = prefixedName.replace(prefix, "");
+      if (container2?.[blockType]?.[nonPrefixedName]) {
+        continue;
+      }
+      output.push(BarbeState.deleteFromObject(stateKey, nonPrefixedName));
     }
     return output;
   }
@@ -725,27 +747,6 @@
     }
     return emptyExecuteTemplate(container, state, GCP_PROJECT_SETUP, CREATED_TF_STATE_KEY);
   }
-  function emptyExecutePostProcess(results) {
-    if (!results.terraform_empty_execute_output) {
-      return [];
-    }
-    let output = [];
-    const prefix = emptyExecuteBagNamePrefix(CREATED_TF_STATE_KEY);
-    for (const prefixedName of Object.keys(results.terraform_empty_execute_output)) {
-      if (!prefixedName.startsWith(prefix)) {
-        continue;
-      }
-      const nonPrefixedName = prefixedName.replace(prefix, "");
-      if (container?.gcp_project_setup?.[nonPrefixedName]) {
-        continue;
-      }
-      output.push(
-        BarbeState.deleteFromObject(CREATED_TF_STATE_KEY, nonPrefixedName),
-        BarbeState.deleteFromObject(CREATED_PROJECT_NAME_KEY, nonPrefixedName)
-      );
-    }
-    return output;
-  }
   function gcpProjectSetupApply() {
     const results = importComponents(container, [{
       name: "gcp_project_setup_apply",
@@ -780,7 +781,8 @@
       ];
     };
     let databags = [
-      ...emptyExecutePostProcess(results),
+      ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_TF_STATE_KEY),
+      ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_PROJECT_NAME_KEY),
       ...alreadyDeployedProjectOutput
     ];
     if (results.terraform_execute_output) {
@@ -823,7 +825,8 @@
       ];
     };
     let databags = [
-      ...emptyExecutePostProcess(results),
+      ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_TF_STATE_KEY),
+      ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_PROJECT_NAME_KEY),
       //we keep that in case the calling template uses it, even tho it just got destroyed
       ...alreadyDeployedProjectOutput,
       ...iterateBlocks(container, GCP_PROJECT_SETUP, destroyProcessResultsIterator).flat()

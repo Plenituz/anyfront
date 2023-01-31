@@ -468,6 +468,9 @@
   function barbeLifecycleStep() {
     return os.getenv("BARBE_LIFECYCLE_STEP");
   }
+  function barbeCommand() {
+    return os.getenv("BARBE_COMMAND");
+  }
   function barbeOutputDir() {
     return os.getenv("BARBE_OUTPUT_DIR");
   }
@@ -495,6 +498,23 @@
       Value: valueKey
     })
   };
+
+  // anyfront-lib/consts.ts
+  var GCP_PROJECT_SETUP = "gcp_project_setup";
+  var GCP_NEXT_JS = "gcp_next_js";
+  var BARBE_SLS_VERSION = "v0.1.1";
+  var ANYFRONT_VERSION = "v0.1.1";
+  var TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute/${BARBE_SLS_VERSION}/.js`;
+  var AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam/${BARBE_SLS_VERSION}/.js`;
+  var AWS_LAMBDA_URL = `https://hub.barbe.app/barbe-serverless/aws_function/${BARBE_SLS_VERSION}/.js`;
+  var GCP_PROJECT_SETUP_URL = `https://hub.barbe.app/anyfront/gcp_project_setup/${ANYFRONT_VERSION}/.js`;
+  var AWS_S3_SYNC_URL = `https://hub.barbe.app/anyfront/aws_s3_sync_files/${ANYFRONT_VERSION}/.js`;
+  var FRONTEND_BUILD_URL = `https://hub.barbe.app/anyfront/frontend_build/${ANYFRONT_VERSION}/.js`;
+  var GCP_CLOUDRUN_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/gcp_cloudrun_static_hosting/${ANYFRONT_VERSION}/.js`;
+  var AWS_CLOUDFRONT_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/aws_cloudfront_static_hosting/${ANYFRONT_VERSION}/.js`;
+
+  // gcp_next_js/Dockerfile.dockerfile
+  var Dockerfile_default = '# https://github.com/vercel/next.js/blob/canary/examples/with-docker/Dockerfile\nFROM node:{{node_version}}{{node_version_tag}}\nWORKDIR /app\n\nENV NODE_ENV production\nENV NEXT_TELEMETRY_DISABLED 1\n\nCOPY . .\n\nEXPOSE 8080\nENV PORT 8080\nCMD ["node", "server.js"]';
 
   // ../../barbe-serverless/src/barbe-sls-lib/lib.ts
   function compileDefaults(container2, name) {
@@ -528,6 +548,9 @@
   function compileNamePrefix(blockVal) {
     return concatStrArr(blockVal.name_prefix || asSyntax([]));
   }
+  function compileBlockParam(blockVal, blockName) {
+    return asVal(mergeTokens((blockVal[blockName] || asSyntax([])).ArrayConst || []));
+  }
   function preConfCloudResourceFactory(blockVal, kind, preconf, bagPreconf) {
     const cloudResourceId = blockVal.cloudresource_id ? asStr(blockVal.cloudresource_id) : void 0;
     const cloudResourceDir = blockVal.cloudresource_dir ? asStr(blockVal.cloudresource_dir) : void 0;
@@ -548,104 +571,23 @@
       });
     };
   }
-  var __awsCredsCached = void 0;
-  function getAwsCreds() {
-    if (__awsCredsCached) {
-      return __awsCredsCached;
+  var __gcpTokenCached = "";
+  function getGcpToken() {
+    if (__gcpTokenCached) {
+      return __gcpTokenCached;
     }
     const transformed = applyTransformers([{
       Name: "state_store_credentials",
-      Type: "aws_credentials_request",
+      Type: "gcp_token_request",
       Value: {}
     }]);
-    const creds = transformed.aws_credentials?.state_store_credentials[0]?.Value;
-    if (!creds) {
-      throw new Error("aws_credentials not found");
+    const token = transformed.gcp_token?.state_store_credentials[0]?.Value;
+    if (!token) {
+      throw new Error("gcp_token not found");
     }
-    const credsObj = asVal(creds);
-    __awsCredsCached = {
-      access_key_id: asStr(credsObj.access_key_id),
-      secret_access_key: asStr(credsObj.secret_access_key),
-      session_token: asStr(credsObj.session_token)
-    };
-    return __awsCredsCached;
+    __gcpTokenCached = asStr(asVal(token).access_token);
+    return __gcpTokenCached;
   }
-  function applyMixins(str, mixins) {
-    for (const mixinName in mixins) {
-      str = str.replace(new RegExp(`{{${mixinName}}}`, "g"), mixins[mixinName]);
-    }
-    return str;
-  }
-
-  // aws_cloudfront_static_hosting/lister.go
-  var lister_default = 'package main\n\nimport (\n	"bytes"\n	"os"\n	"path/filepath"\n	"strings"\n)\n\n//this is here cause the escaping mecanism of jsonnet doesnt work properly\nconst l = "\\n"\n\nfunc main() {\n	err := listAllFiles()\n	if err != nil {\n		panic(err)\n	}\n}\n\nfunc listAllFiles() error {\n	var files []string\n	err := filepath.WalkDir(".", func(path string, d os.DirEntry, err error) error {\n		if err != nil {\n			return err\n		}\n		if !d.IsDir() {\n			files = append(files, path)\n		}\n		return nil\n	})\n	if err != nil {\n		return err\n	}\n\n	output := strings.Builder{}\n	for i, file := range files {\n		if file == "lister.go" || file == "origin_request.js" {\n			continue\n		}\n		if i != 0 {\n			output.WriteString("    ")\n		}\n		output.WriteString("\\"")\n		output.WriteString(file)\n		output.WriteString("\\": true")\n		if i != len(files)-1 {\n			output.WriteString(",")\n			output.WriteString(l)\n		}\n	}\n\n	template, err := os.ReadFile("origin_request.js")\n	if err != nil {\n		return err\n	}\n\n	template = bytes.ReplaceAll(template, []byte("{{LOCATIONS}}"), []byte(output.String()))\n	return os.WriteFile("origin_request.js", template, 0644)\n}';
-
-  // aws_cloudfront_static_hosting/origin_request.template.js
-  var origin_request_template_default = `const locations = {
-    {{LOCATIONS}}
-}
-
-exports.handler = (event, context, callback) => {
-    const request = event.Records[0].cf.request;
-    const headers = request.headers;
-
-    if(request.uri.substring(1) in locations) {
-        callback(null, request);
-        return
-    }
-
-    if (request.uri === "/") {
-        request.uri = "/{{root_object}}";
-    }
-
-    if (request.uri.endsWith("/")) {
-        const redirectResponse = {
-            status: '301',
-            statusDescription: 'Moved Permanently',
-            headers: {
-                'location': [{
-                    key: 'Location',
-                    value: request.uri.substring(0, request.uri.length - 1),
-                }],
-                'cache-control': [{
-                    key: 'Cache-Control',
-                    value: "max-age=3600"
-                }],
-            },
-        };
-        callback(null, redirectResponse)
-        return
-    }
-
-    if (!request.uri.endsWith(".html")) {
-        (() => {
-            //receiving something like /docs
-
-            let toFind = request.uri.substring(1)
-            if (toFind in locations) {
-                return
-            }
-
-            // trying file "docs.html"
-            toFind += ".html"
-            if (toFind in locations) {
-                request.uri = "/" + toFind
-                return
-            }
-
-            // trying file "docs/index.html"
-            toFind = toFind.substring(0, toFind.length - ".html".length)
-            toFind += "/index.html"
-            if (toFind in locations) {
-                request.uri = "/" + toFind
-                return
-            }
-            console.log("not found for object request: '" + request.uri + "'")
-        })()
-    }
-
-    callback(null, request);
-};`;
 
   // anyfront-lib/lib.ts
   function emptyExecuteBagNamePrefix(stateKey) {
@@ -720,27 +662,7 @@ exports.handler = (event, context, callback) => {
     return visitTokens(container2["cr_[terraform]"][""][0].Value, visitor);
   }
 
-  // anyfront-lib/consts.ts
-  var AWS_S3_SYNC_FILES = "aws_s3_sync_files";
-  var AWS_CLOUDFRONT_STATIC_HOSTING = "aws_cloudfront_static_hosting";
-  var BARBE_SLS_VERSION = "v0.1.1";
-  var ANYFRONT_VERSION = "v0.1.1";
-  var TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute/${BARBE_SLS_VERSION}/.js`;
-  var AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam/${BARBE_SLS_VERSION}/.js`;
-  var AWS_LAMBDA_URL = `https://hub.barbe.app/barbe-serverless/aws_function/${BARBE_SLS_VERSION}/.js`;
-  var GCP_PROJECT_SETUP_URL = `https://hub.barbe.app/anyfront/gcp_project_setup/${ANYFRONT_VERSION}/.js`;
-  var AWS_S3_SYNC_URL = `https://hub.barbe.app/anyfront/aws_s3_sync_files/${ANYFRONT_VERSION}/.js`;
-  var FRONTEND_BUILD_URL = `https://hub.barbe.app/anyfront/frontend_build/${ANYFRONT_VERSION}/.js`;
-  var GCP_CLOUDRUN_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/gcp_cloudrun_static_hosting/${ANYFRONT_VERSION}/.js`;
-  var AWS_CLOUDFRONT_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/aws_cloudfront_static_hosting/${ANYFRONT_VERSION}/.js`;
-
-  // ../../barbe-serverless/src/barbe-sls-lib/consts.ts
-  var AWS_FUNCTION = "aws_function";
-  var AWS_IAM_LAMBDA_ROLE = "aws_iam_lambda_role";
-  var BARBE_SLS_VERSION2 = "v0.1.1";
-  var TERRAFORM_EXECUTE_URL2 = `https://hub.barbe.app/barbe-serverless/terraform_execute/${BARBE_SLS_VERSION2}/.js`;
-
-  // aws_cloudfront_static_hosting/aws_cloudfront_static_hosting.ts
+  // gcp_next_js/gcp_next_js.ts
   var container = readDatabagContainer();
   var outputDir = barbeOutputDir();
   var state = BarbeState.readState();
@@ -749,435 +671,458 @@ exports.handler = (event, context, callback) => {
     if (!container2["cr_[terraform]"]) {
       return [];
     }
-    return emptyExecuteTemplate(container2, state2, AWS_CLOUDFRONT_STATIC_HOSTING, CREATED_TF_STATE_KEY);
+    return emptyExecuteTemplate(container2, state2, GCP_NEXT_JS, CREATED_TF_STATE_KEY);
+  }
+  function makeGcpProjectSetupImport(bag, block, namePrefix) {
+    return {
+      name: `gcp_next_js_${barbeLifecycleStep()}_${bag.Name}`,
+      url: GCP_PROJECT_SETUP_URL,
+      copyFromContainer: ["cr_[terraform]"],
+      input: [{
+        Type: GCP_PROJECT_SETUP,
+        Name: bag.Name,
+        Value: {
+          project_id: block.project_id,
+          project_name: appendToTemplate(namePrefix, [bag.Name]),
+          organization_id: block.organization_id,
+          billing_account_id: block.billing_account_id,
+          billing_account_name: block.billing_account_name,
+          services_to_activate: [
+            "run.googleapis.com",
+            "compute.googleapis.com",
+            "dns.googleapis.com"
+          ]
+        }
+      }]
+    };
+  }
+  function preGenerate() {
+    if (container.state_store) {
+      return;
+    }
+    const databags = iterateBlocks(container, GCP_NEXT_JS, (bag) => {
+      const [block, namePrefix] = applyDefaults(container, bag.Value);
+      return {
+        Type: "state_store",
+        Name: "",
+        Value: {
+          name_prefix: [block.name_prefix ? namePrefix : "", appendToTemplate(namePrefix, [`${bag.Name}-`])],
+          gcp: asBlock([{
+            project_id: block.project_id
+          }])
+        }
+      };
+    });
+    exportDatabags(databags);
   }
   function generateIterator1(bag) {
     if (!bag.Value) {
       return [];
     }
     const [block, namePrefix] = applyDefaults(container, bag.Value);
-    if (!block.build_dir) {
-      throw new Error(`build_dir is required for 'aws_cloudfront_static_hosting.${bag.Name}'`);
-    }
-    const dir = `aws_cf_static_hosting_${bag.Name}`;
+    const dir = `gcp_next_js_${bag.Name}`;
     const bagPreconf = {
       dir,
       id: dir
     };
-    const rootObj = block.root_object || "index.html";
-    const domainNames = asVal(block.domain_names || asSyntax([]));
+    const dotDomain = compileBlockParam(block, "domain");
+    const dotBuild = compileBlockParam(block, "build");
+    const domainNames = dotDomain.name ? [dotDomain.name] : [];
+    const nodeJsVersion = asStr(dotBuild.nodejs_version || block.nodejs_version || "16");
     const cloudResource = preConfCloudResourceFactory(block, "resource", void 0, bagPreconf);
     const cloudData = preConfCloudResourceFactory(block, "data", void 0, bagPreconf);
     const cloudOutput = preConfCloudResourceFactory(block, "output", void 0, bagPreconf);
     const cloudProvider = preConfCloudResourceFactory(block, "provider", void 0, bagPreconf);
+    const cloudVariable = preConfCloudResourceFactory(block, "variable", void 0, bagPreconf);
     const cloudTerraform = preConfCloudResourceFactory(block, "terraform", void 0, bagPreconf);
-    const acmCertificateResources = (domain) => {
-      return [
-        cloudResource("aws_acm_certificate", "cert", {
-          domain_name: domain,
-          validation_method: "DNS"
-        }),
-        cloudResource("aws_route53_record", "validation_record", {
-          for_each: {
-            Type: "for",
-            ForKeyVar: "dvo",
-            ForCollExpr: asTraversal("aws_acm_certificate.cert.domain_validation_options"),
-            ForKeyExpr: asTraversal("dvo.domain_name"),
-            ForValExpr: asSyntax({
-              name: asTraversal("dvo.resource_record_name"),
-              record: asTraversal("dvo.resource_record_value"),
-              type: asTraversal("dvo.resource_record_type")
-            })
-          },
-          allow_overwrite: true,
-          name: asTraversal("each.value.name"),
-          records: [
-            asTraversal("each.value.record")
+    const nextJsBuild = () => {
+      const nodeJsVersionTag = asStr(dotBuild.nodejs_version_tag || block.nodejs_version_tag || "-alpine");
+      const appDir = asStr(dotBuild.app_dir || block.app_dir || ".");
+      const installCmd = asStr(dotBuild.install_cmd || "npm install");
+      const buildCmd = asStr(dotBuild.build_cmd || "npm run build");
+      return {
+        Type: "buildkit_run_in_container",
+        Name: `gcp_next_js_${bag.Name}`,
+        Value: {
+          display_name: `Next.js build - ${bag.Name}`,
+          excludes: [
+            "**/node_modules",
+            "node_modules"
           ],
-          ttl: 60,
-          type: asTraversal("each.value.type"),
-          zone_id: asTraversal("data.aws_route53_zone.zone.zone_id")
-        }),
-        cloudResource("aws_acm_certificate_validation", "validation", {
-          certificate_arn: asTraversal("aws_acm_certificate.cert.arn"),
-          validation_record_fqdns: {
-            Type: "for",
-            ForValVar: "record",
-            ForCollExpr: asTraversal("aws_route53_record.validation_record"),
-            ForValExpr: asTraversal("record.fqdn")
-          }
-        })
-      ];
-    };
-    const staticFileDistrib = () => {
-      let localDatabags = [
-        cloudProvider("", "aws", {
-          region: block.region || os.getenv("AWS_REGION") || "us-east-1"
-        }),
-        cloudResource("aws_s3_bucket", "origin", {
-          bucket: appendToTemplate(namePrefix, ["origin"]),
-          force_destroy: true
-        }),
-        cloudOutput("", "static_hosting_s3_bucket", {
-          value: asTraversal("aws_s3_bucket.origin.id")
-        }),
-        cloudResource("aws_s3_bucket_acl", "origin_acl", {
-          bucket: asTraversal("aws_s3_bucket.origin.id"),
-          acl: "private"
-        }),
-        cloudResource("aws_s3_bucket_cors_configuration", "origin_cors", {
-          bucket: asTraversal("aws_s3_bucket.origin.id"),
-          cors_rule: asBlock([{
-            allowed_headers: ["*"],
-            allowed_methods: ["GET"],
-            allowed_origins: ["*"],
-            max_age_seconds: 3e3
-          }])
-        }),
-        cloudResource("aws_cloudfront_origin_access_identity", "origin_access_id", {
-          comment: asTemplate([
-            "origin access identity for",
-            appendToTemplate(namePrefix, ["origin"])
-          ])
-        }),
-        cloudData("aws_iam_policy_document", "origin_policy", {
-          statement: asBlock([
-            {
-              actions: ["s3:GetObject"],
-              resources: [
-                asTemplate([
-                  asTraversal("aws_s3_bucket.origin.arn"),
-                  "/*"
-                ])
-              ],
-              principals: asBlock([{
-                type: "AWS",
-                identifiers: [
-                  asTraversal("aws_cloudfront_origin_access_identity.origin_access_id.iam_arn")
-                ]
-              }])
-            },
-            {
-              actions: ["s3:ListBucket"],
-              resources: [
-                asTraversal("aws_s3_bucket.origin.arn")
-              ],
-              principals: asBlock([{
-                type: "AWS",
-                identifiers: [
-                  asTraversal("aws_cloudfront_origin_access_identity.origin_access_id.iam_arn")
-                ]
-              }])
-            }
-          ])
-        }),
-        cloudResource("aws_s3_bucket_policy", "origin_policy", {
-          bucket: asTraversal("aws_s3_bucket.origin.id"),
-          policy: asTraversal("data.aws_iam_policy_document.origin_policy.json")
-        }),
-        cloudOutput("", "static_hosting_cf_distrib", {
-          value: asTraversal("aws_cloudfront_distribution.distribution.id")
-        }),
-        cloudData("aws_cloudfront_cache_policy", "caching_optimized", {
-          name: "Managed-CachingOptimized"
-        }),
-        cloudResource("aws_cloudfront_distribution", "distribution", {
-          enabled: true,
-          default_root_object: rootObj,
-          is_ipv6_enabled: true,
-          price_class: "PriceClass_All",
-          restrictions: asBlock([{
-            geo_restriction: asBlock([{
-              restriction_type: "none"
-            }])
-          }]),
-          origin: asBlock([{
-            domain_name: asTraversal("aws_s3_bucket.origin.bucket_regional_domain_name"),
-            origin_id: "bucket",
-            s3_origin_config: asBlock([{
-              origin_access_identity: asTraversal("aws_cloudfront_origin_access_identity.origin_access_id.cloudfront_access_identity_path")
-            }])
-          }]),
-          default_cache_behavior: asBlock([{
-            allowed_methods: ["GET", "HEAD", "OPTIONS"],
-            cached_methods: ["GET", "HEAD"],
-            target_origin_id: "bucket",
-            viewer_protocol_policy: "redirect-to-https",
-            compress: true,
-            cache_policy_id: asTraversal("data.aws_cloudfront_cache_policy.caching_optimized.id"),
-            lambda_function_association: asBlock([{
-              event_type: "origin-request",
-              lambda_arn: asTraversal("aws_function.origin-request.qualified_arn"),
-              include_body: false
-            }])
-          }]),
-          custom_error_response: asBlock([{
-            error_caching_min_ttl: 0,
-            error_code: 404,
-            response_code: 200,
-            response_page_path: appendToTemplate(asSyntax("/"), [rootObj])
-          }]),
-          aliases: domainNames,
-          viewer_certificate: asBlock([
-            (() => {
-              const minimumProtocolVersion = "TLSv1.2_2021";
-              if (domainNames.length === 0) {
-                return {
-                  cloudfront_default_certificate: true
-                };
-              }
-              if (block.certificate_arn) {
-                return {
-                  acm_certificate_arn: block.certificate_arn,
-                  ssl_support_method: "sni-only",
-                  minimum_protocol_version: minimumProtocolVersion
-                };
-              }
-              if (block.existing_certificate_domain) {
-                return {
-                  acm_certificate_arn: asTraversal(`data.aws_acm_certificate.imported_certificate.arn`),
-                  ssl_support_method: "sni-only",
-                  minimum_protocol_version: minimumProtocolVersion
-                };
-              }
-              if (block.certificate_domain_to_create) {
-                return {
-                  acm_certificate_arn: asTraversal(`aws_acm_certificate_validation.validation.certificate_arn`),
-                  ssl_support_method: "sni-only",
-                  minimum_protocol_version: minimumProtocolVersion
-                };
-              }
-              if (domainNames.length > 1) {
-                throw new Error("no certificate_domain_to_create, existing_certificate_domain or certificate_arn given with multiple domain names. The easy way to fix this is to provide a certificate_domain_to_create like '*.domain.com'");
-              }
-              return {
-                acm_certificate_arn: asTraversal(`data.aws_acm_certificate.imported_certificate.arn`),
-                ssl_support_method: "sni-only",
-                minimum_protocol_version: minimumProtocolVersion
-              };
-            })()
-          ])
-        })
-      ];
-      if (domainNames.length > 0) {
-        localDatabags.push(
-          cloudData("aws_route53_zone", "zone", {
-            name: block.zone
-          }),
-          ...domainNames.map((domainName, i) => cloudResource("aws_route53_record", `cf_distrib_domain_record_${i}`, {
-            zone_id: asTraversal("data.aws_route53_zone.zone.zone_id"),
-            name: domainName,
-            type: "CNAME",
-            ttl: 300,
-            records: [
-              asTraversal("aws_cloudfront_distribution.distribution.domain_name")
-            ]
-          }))
-        );
-        if (!block.certificate_arn) {
-          if (block.existing_certificate_domain) {
-            localDatabags.push(
-              cloudData("aws_acm_certificate", "imported_certificate", {
-                domain: block.existing_certificate_domain,
-                types: ["AMAZON_ISSUED"],
-                most_recent: true
-              })
-            );
-          } else if (block.certificate_domain_to_create) {
-            localDatabags.push(...acmCertificateResources(block.certificate_domain_to_create));
-          } else if (domainNames.length === 1) {
-            localDatabags.push(...acmCertificateResources(domainNames[0]));
+          dockerfile: `
+                    # https://github.com/vercel/next.js/blob/canary/examples/with-docker/Dockerfile
+                    # Rebuild the source code only when needed
+                    FROM node:${nodeJsVersion}${nodeJsVersionTag} AS builder
+                    RUN apk add --no-cache libc6-compat
+
+                    WORKDIR /app
+                    COPY --from=src ./${appDir} .
+                    
+                    ENV NEXT_TELEMETRY_DISABLED 1
+                    RUN ${installCmd}
+                    RUN ${buildCmd}
+
+                    # Production image, copy all the files and run next
+                    FROM scratch
+                    WORKDIR /app
+
+                    COPY --from=builder /app/public ./public
+                    COPY --from=builder /app/.next/standalone ./
+                    COPY --from=builder /app/.next/static ./.next/static`,
+          exported_files: {
+            ".": `${dir}/build`
           }
         }
+      };
+    };
+    const gcpNextJsResources = () => {
+      let localDatabags = [
+        cloudVariable("", "gcp_project", {
+          type: asTraversal("string")
+        }),
+        cloudProvider("", "google", {
+          region: block.region || "us-central1",
+          project: asTraversal("var.gcp_project")
+        }),
+        cloudResource("google_cloud_run_service", "cloudrun", {
+          name: appendToTemplate(namePrefix, [`${bag.Name}-cloudrun-srv`]),
+          location: block.region || "us-central1",
+          autogenerate_revision_name: true,
+          template: asBlock([{
+            spec: asBlock([{
+              containers: asBlock([{
+                image: asTemplate([
+                  "gcr.io/",
+                  asTraversal("var.gcp_project"),
+                  "/",
+                  asStr(appendToTemplate(namePrefix, [`next-${bag.Name}`])),
+                  ":latest"
+                ])
+              }])
+            }])
+          }]),
+          traffic: asBlock([{
+            percent: 100,
+            latest_revision: true
+          }])
+        }),
+        cloudData("google_iam_policy", "noauth", {
+          binding: asBlock([{
+            role: "roles/run.invoker",
+            members: ["allUsers"]
+          }])
+        }),
+        cloudResource("google_cloud_run_service_iam_policy", "noauth", {
+          location: asTraversal("google_cloud_run_service.cloudrun.location"),
+          service: asTraversal("google_cloud_run_service.cloudrun.name"),
+          project: asTraversal("google_cloud_run_service.cloudrun.project"),
+          policy_data: asTraversal("data.google_iam_policy.noauth.policy_data")
+        }),
+        cloudResource("google_compute_global_address", "lb_ip", {
+          project: asTraversal("google_cloud_run_service.cloudrun.project"),
+          name: appendToTemplate(namePrefix, [`${bag.Name}-lb-ip`])
+        }),
+        cloudResource("google_compute_region_network_endpoint_group", "lb_epgroup", {
+          project: asTraversal("google_cloud_run_service.cloudrun.project"),
+          name: appendToTemplate(namePrefix, [`${bag.Name}-lb-neg`]),
+          region: block.region || "us-central1",
+          network_endpoint_type: "SERVERLESS",
+          cloud_run: asBlock([{
+            service: asTraversal("google_cloud_run_service.cloudrun.name")
+          }])
+        }),
+        cloudResource("google_compute_backend_service", "lb_backend", {
+          project: asTraversal("google_cloud_run_service.cloudrun.project"),
+          name: appendToTemplate(namePrefix, [`${bag.Name}-lb-backend`]),
+          load_balancing_scheme: "EXTERNAL_MANAGED",
+          enable_cdn: true,
+          backend: asBlock([{
+            balancing_mode: "UTILIZATION",
+            capacity_scaler: 0.85,
+            group: asTraversal("google_compute_region_network_endpoint_group.lb_epgroup.id")
+          }]),
+          cdn_policy: asBlock([{
+            cache_mode: "CACHE_ALL_STATIC",
+            client_ttl: 3600,
+            default_ttl: 3600,
+            max_ttl: 86400,
+            negative_caching: true,
+            serve_while_stale: 86400,
+            signed_url_cache_max_age_sec: 7200
+          }])
+        }),
+        cloudResource("google_compute_url_map", "lb_urlmap", {
+          project: asTraversal("google_cloud_run_service.cloudrun.project"),
+          name: appendToTemplate(namePrefix, [`${bag.Name}-lb-urlmap`]),
+          default_service: asTraversal("google_compute_backend_service.lb_backend.id"),
+          path_matcher: asBlock([{
+            name: "allpaths",
+            default_service: asTraversal("google_compute_backend_service.lb_backend.id"),
+            route_rules: asBlock([{
+              priority: 1,
+              url_redirect: asBlock([{
+                https_redirect: true,
+                redirect_response_code: "MOVED_PERMANENTLY_DEFAULT"
+              }])
+            }])
+          }])
+        }),
+        cloudOutput("", "load_balancer_ip_addr", {
+          value: asTraversal("google_compute_global_address.lb_ip.address")
+        }),
+        cloudOutput("", "load_balancer_url_map", {
+          value: asTraversal("google_compute_url_map.lb_urlmap.name")
+        }),
+        cloudOutput("", "cloudrun_service_name", {
+          value: asTraversal("google_cloud_run_service.cloudrun.name")
+        })
+      ];
+      if (dotDomain.name) {
+        localDatabags.push(
+          cloudResource("google_compute_target_https_proxy", "lb_target_https", {
+            project: asTraversal("google_cloud_run_service.cloudrun.project"),
+            name: appendToTemplate(namePrefix, [`${bag.Name}-https-proxy`]),
+            url_map: asTraversal("google_compute_url_map.lb_urlmap.id"),
+            ssl_certificates: [asTraversal("google_compute_managed_ssl_certificate.lb_ssl_cert.name")]
+          }),
+          cloudResource("google_compute_global_forwarding_rule", "lb_forwarding", {
+            project: asTraversal("google_cloud_run_service.cloudrun.project"),
+            name: appendToTemplate(namePrefix, [`${bag.Name}-lb-forwarding`]),
+            load_balancing_scheme: "EXTERNAL_MANAGED",
+            target: asTraversal("google_compute_target_https_proxy.lb_target_https.id"),
+            ip_address: asTraversal("google_compute_global_address.lb_ip.id"),
+            port_range: "443"
+          }),
+          cloudResource("google_compute_url_map", "lb_redirect_to_https", {
+            project: asTraversal("google_cloud_run_service.cloudrun.project"),
+            name: appendToTemplate(namePrefix, [`${bag.Name}-lb-redirect-to-https-urlmap`]),
+            default_url_redirect: asBlock([{
+              redirect_response_code: "MOVED_PERMANENTLY_DEFAULT",
+              https_redirect: true,
+              strip_query: false
+            }])
+          }),
+          cloudResource("google_compute_target_http_proxy", "lb_target_http", {
+            project: asTraversal("google_cloud_run_service.cloudrun.project"),
+            name: appendToTemplate(namePrefix, [`${bag.Name}-http-proxy`]),
+            url_map: asTraversal("google_compute_url_map.lb_redirect_to_https.id")
+          }),
+          cloudResource("google_compute_global_forwarding_rule", "lb_http_forwarding", {
+            project: asTraversal("google_cloud_run_service.cloudrun.project"),
+            name: appendToTemplate(namePrefix, [`${bag.Name}-http-forwarding`]),
+            target: asTraversal("google_compute_target_http_proxy.lb_target_http.id"),
+            ip_address: asTraversal("google_compute_global_address.lb_ip.id"),
+            port_range: "80"
+          }),
+          cloudResource("google_compute_managed_ssl_certificate", "lb_ssl_cert", {
+            project: asTraversal("google_cloud_run_service.cloudrun.project"),
+            name: appendToTemplate(namePrefix, [`${bag.Name}-lb-ssl-cert`]),
+            managed: asBlock([{
+              domains: [appendToTemplate(dotDomain.name, ["."])]
+            }])
+          }),
+          cloudResource("google_dns_record_set", "lb_dns", {
+            project: dotDomain.zone_project || asTraversal("google_cloud_run_service.cloudrun.project"),
+            name: appendToTemplate(dotDomain.name, ["."]),
+            type: "A",
+            ttl: 300,
+            managed_zone: dotDomain.zone,
+            rrdatas: [asTraversal("google_compute_global_address.lb_ip.address")]
+          })
+        );
+      } else {
+        localDatabags.push(
+          cloudResource("google_compute_target_http_proxy", "lb_target_http", {
+            project: asTraversal("google_cloud_run_service.cloudrun.project"),
+            name: appendToTemplate(namePrefix, [`${bag.Name}-http-proxy`]),
+            url_map: asTraversal("google_compute_url_map.lb_urlmap.id")
+          }),
+          cloudResource("google_compute_global_forwarding_rule", "lb_http_forwarding", {
+            project: asTraversal("google_cloud_run_service.cloudrun.project"),
+            name: appendToTemplate(namePrefix, [`${bag.Name}-http-forwarding`]),
+            load_balancing_scheme: "EXTERNAL_MANAGED",
+            target: asTraversal("google_compute_target_http_proxy.lb_target_http.id"),
+            ip_address: asTraversal("google_compute_global_address.lb_ip.id"),
+            port_range: "80"
+          })
+        );
       }
       return localDatabags;
     };
-    let databags = [
-      {
-        Type: "buildkit_run_in_container",
-        Name: `aws_cloudfront_static_hosting_gen_origin_req_${bag.Name}`,
-        Value: {
-          no_cache: true,
-          display_name: `\u03BB Codegen - aws_cloudfront_static_hosting.${bag.Name}`,
-          input_files: {
-            "__barbe_lister.go": lister_default,
-            "__barbe_base_script.js": applyMixins(origin_request_template_default, {
-              root_object: rootObj
-            })
-          },
-          dockerfile: `
-                    FROM golang:1.18-alpine AS builder
-
-                    COPY --from=src ./${asStr(block.build_dir)} /src
-                    WORKDIR /src
-
-                    COPY --from=src __barbe_base_script.js ./origin_request.js
-                    COPY --from=src __barbe_lister.go ./lister.go
-                    RUN go run lister.go`,
-          exported_files: {
-            "origin_request.js": `aws_cf_static_hosting_${bag.Name}/origin_request.js`
-          }
-        }
-      },
-      ...staticFileDistrib()
-    ];
-    if (container["cr_[terraform]"]) {
-      databags.push(cloudTerraform("", "", prependTfStateFileName(container, `_aws_cf_static_hosting_${bag.Name}`)));
+    let databags = gcpNextJsResources();
+    if (barbeCommand() !== "destroy" && !(dotBuild.disabled && asVal(dotBuild.disabled))) {
+      databags.push(nextJsBuild());
     }
-    let imports = [
-      {
-        name: `aws_cloudfront_static_hosting_aws_iam_${bag.Name}`,
-        url: AWS_IAM_URL,
-        input: [{
-          Type: AWS_IAM_LAMBDA_ROLE,
-          Name: "default",
-          Value: {
-            cloudresource_dir: dir,
-            cloudresource_id: dir,
-            assumable_by: ["edgelambda.amazonaws.com", "lambda.amazonaws.com"],
-            name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])]
-          }
-        }]
-      },
-      {
-        name: `aws_cloudfront_static_hosting_aws_lambda_${bag.Name}`,
-        url: AWS_LAMBDA_URL,
-        input: [{
-          Type: AWS_FUNCTION,
-          Name: "origin-request",
-          Value: {
-            cloudresource_dir: dir,
-            cloudresource_id: dir,
-            package: [{
-              file_map: {
-                "*": "origin_request.js"
-              },
-              include: [
-                `${outputDir}/${dir}/origin_request.js`
-              ]
-            }],
-            handler: "origin_request.handler",
-            runtime: "nodejs16.x",
-            timeout: 30,
-            name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])]
-          }
-        }]
-      }
-    ];
-    return [{ databags, imports }];
+    if (container["cr_[terraform]"]) {
+      databags.push(cloudTerraform("", "", prependTfStateFileName(container, `_gcp_next_js_${bag.Name}`)));
+    }
+    return [{
+      databags,
+      imports: [makeGcpProjectSetupImport(bag, block, namePrefix)]
+    }];
   }
   function generate() {
-    const dbOrImports = iterateBlocks(container, AWS_CLOUDFRONT_STATIC_HOSTING, generateIterator1).flat();
+    const dbOrImports = iterateBlocks(container, GCP_NEXT_JS, generateIterator1).flat();
     exportDatabags(dbOrImports.map((db) => db.databags).flat());
     exportDatabags(importComponents(container, dbOrImports.map((db) => db.imports).flat()));
   }
-  function applyIterator1(bag) {
+  function applyIteratorStep1(bag) {
     if (!bag.Value) {
       return [];
     }
-    return [{
-      Type: "terraform_execute",
-      Name: `aws_cloudfront_static_hosting_${bag.Name}`,
-      Value: {
-        display_name: `Terraform apply - aws_cloudfront_static_hosting.${bag.Name}`,
-        mode: "apply",
-        dir: `${outputDir}/aws_cf_static_hosting_${bag.Name}`
-      }
-    }];
+    return [
+      makeGcpProjectSetupImport(bag, ...applyDefaults(container, bag.Value))
+    ];
   }
-  var applyIterator2 = (terraformExecuteResults) => (bag) => {
+  var applyIteratorStep2 = (gcpProjectSetupResults) => (bag) => {
     if (!bag.Value) {
+      return [];
+    }
+    if (!gcpProjectSetupResults.gcp_project_setup_output?.[bag.Name]) {
       return [];
     }
     const [block, namePrefix] = applyDefaults(container, bag.Value);
+    const gcpToken = getGcpToken();
+    const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value).project_name);
+    const imageName = asStr(appendToTemplate(namePrefix, ["next-", bag.Name]));
+    const dir = `${outputDir}/gcp_next_js_${bag.Name}`;
+    const buildDir = `${dir}/build`;
+    const gcpNginxImageBuild = {
+      Type: "buildkit_run_in_container",
+      Name: `${bag.Name}_gcp_next_js`,
+      Value: {
+        input_files: {
+          "__barbe_Dockerfile": Dockerfile_default
+        },
+        dockerfile: `
+                FROM docker
+
+                RUN echo "${gcpToken}" | docker login -u oauth2accesstoken --password-stdin https://gcr.io
+
+                COPY --from=src ./${buildDir} /src
+                WORKDIR /src
+
+                RUN mkdir __barbe_tmp
+                COPY --from=src __barbe_Dockerfile ./__barbe_tmp/Dockerfile
+
+                RUN --mount=type=ssh,id=docker.sock,target=/var/run/docker.sock docker build -f __barbe_tmp/Dockerfile -t gcr.io/${gcpProjectName}/${imageName} .
+                RUN --mount=type=ssh,id=docker.sock,target=/var/run/docker.sock docker push gcr.io/${gcpProjectName}/${imageName}
+
+                RUN touch tmp`,
+        no_cache: true,
+        exported_files: "tmp",
+        display_name: `Image build - gcp_next_js.${bag.Name}`
+      }
+    };
+    const tfExecute = {
+      name: `gcp_cloudrun_static_hosting_apply_${bag.Name}`,
+      url: TERRAFORM_EXECUTE_URL,
+      input: [{
+        Type: "terraform_execute",
+        Name: `gcp_next_js_apply_${bag.Name}`,
+        Value: {
+          display_name: `Terraform apply - gcp_next_js.${bag.Name}`,
+          mode: "apply",
+          dir,
+          variable_values: [{
+            key: "gcp_project",
+            value: gcpProjectName
+          }]
+        }
+      }]
+    };
+    return [{
+      databags: [gcpNginxImageBuild],
+      imports: [tfExecute]
+    }];
+  };
+  var applyIteratorStep3 = (gcpProjectSetupResults, terraformExecuteResults) => (bag) => {
+    if (!bag.Value) {
+      return [];
+    }
     let databags = [
       BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-        [bag.Name]: prependTfStateFileName(container, `_aws_cf_static_hosting_${bag.Name}`)
+        [bag.Name]: prependTfStateFileName(container, `_gcp_next_js_${bag.Name}`)
       })
     ];
-    let imports = [];
-    if (terraformExecuteResults.terraform_execute_output?.[`aws_cloudfront_static_hosting_${bag.Name}`]) {
-      const outputs = asValArrayConst(terraformExecuteResults.terraform_execute_output[`aws_cloudfront_static_hosting_${bag.Name}`][0].Value);
-      const bucketName = asStr(outputs.find((pair) => asStr(pair.key) === "static_hosting_s3_bucket").value);
-      imports.push({
-        name: `aws_cloudfront_static_hosting_s3_sync_${bag.Name}`,
-        url: AWS_S3_SYNC_URL,
-        input: [{
-          Type: AWS_S3_SYNC_FILES,
-          Name: `sync_${bag.Name}`,
-          Value: {
-            display_name: `Uploading files to S3 - ${bag.Name}`,
-            bucket_name: bucketName,
-            delete: true,
-            blob: block.build_dir
-          }
-        }]
-      });
-    }
-    return [{ databags, imports }];
-  };
-  var applyIterator3 = (terraformExecuteResults) => (bag) => {
-    if (!bag.Value) {
-      return [];
+    if (!terraformExecuteResults.terraform_execute_output?.[`gcp_next_js_apply_${bag.Name}`]) {
+      return databags;
     }
     const [block, namePrefix] = applyDefaults(container, bag.Value);
-    let databags = [];
-    if (terraformExecuteResults.terraform_execute_output?.[`aws_cloudfront_static_hosting_${bag.Name}`]) {
-      const outputs = asValArrayConst(terraformExecuteResults.terraform_execute_output[`aws_cloudfront_static_hosting_${bag.Name}`][0].Value);
-      const cfDistribId = asStr(outputs.find((pair) => asStr(pair.key) === "static_hosting_cf_distrib").value);
-      const awsCreds = getAwsCreds();
-      databags.push({
-        Type: "buildkit_run_in_container",
-        Name: `aws_cf_static_hosting_invalidate_${bag.Name}`,
-        Value: {
-          no_cache: true,
-          display_name: `Invalidate CloudFront distribution - aws_cloudfront_static_hosting.${bag.Name}`,
-          dockerfile: `
-                    FROM amazon/aws-cli:latest
+    const tfOutput = asValArrayConst(terraformExecuteResults.terraform_execute_output[`gcp_next_js_apply_${bag.Name}`][0].Value);
+    const cloudrunServiceName = asStr(tfOutput.find((pair) => asStr(pair.key) === "cloudrun_service_name"));
+    const urlMapName = asStr(tfOutput.find((pair) => asStr(pair.key) === "load_balancer_url_map"));
+    const imageName = asStr(appendToTemplate(namePrefix, ["next-", bag.Name]));
+    const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value).project_name);
+    const gcpToken = getGcpToken();
+    const region = asStr(block.region || "us-central1");
+    databags.push({
+      Type: "buildkit_run_in_container",
+      Name: `gcp_next_js_invalidate_${bag.Name}`,
+      Value: {
+        display_name: `Invalidate CDN - gcp_next_js.${bag.Name}`,
+        no_cache: true,
+        dockerfile: `
+            FROM google/cloud-sdk:slim
 
-                    ENV AWS_ACCESS_KEY_ID="${awsCreds.access_key_id}"
-                    ENV AWS_SECRET_ACCESS_KEY="${awsCreds.secret_access_key}"
-                    ENV AWS_SESSION_TOKEN="${awsCreds.session_token}"
-                    ENV AWS_REGION="${block.region || os.getenv("AWS_REGION") || "us-east-1"}"
-                    ENV AWS_PAGER=""
+            ENV CLOUDSDK_AUTH_ACCESS_TOKEN="${gcpToken}"
+            ENV CLOUDSDK_CORE_DISABLE_PROMPTS=1
 
-                    RUN aws cloudfront create-invalidation --distribution-id ${cfDistribId} --paths "/*"`
-        }
-      });
-    }
+            RUN gcloud run deploy ${cloudrunServiceName} --image gcr.io/${gcpProjectName}/${imageName} --project ${gcpProjectName} --region ${region} --quiet
+            RUN gcloud beta compute url-maps invalidate-cdn-cache ${urlMapName} --path "/*" --project ${gcpProjectName} --async --quiet`
+      }
+    });
     return databags;
   };
   function apply() {
-    const step0Import = {
-      name: "aws_cloudfront_static_hosting_apply",
-      url: TERRAFORM_EXECUTE_URL,
-      input: [
-        ...iterateBlocks(container, AWS_CLOUDFRONT_STATIC_HOSTING, applyIterator1).flat(),
-        ...makeEmptyExecuteDatabags(container, state)
-      ]
-    };
-    const terraformExecuteResults = importComponents(container, [step0Import]);
-    exportDatabags(emptyExecutePostProcess(container, terraformExecuteResults, AWS_CLOUDFRONT_STATIC_HOSTING, CREATED_TF_STATE_KEY));
-    const step2Result = iterateBlocks(container, AWS_CLOUDFRONT_STATIC_HOSTING, applyIterator2(terraformExecuteResults)).flat();
-    exportDatabags(step2Result.map((db) => db.databags).flat());
-    importComponents(container, step2Result.map((db) => db.imports).flat());
-    applyTransformers(iterateBlocks(container, AWS_CLOUDFRONT_STATIC_HOSTING, applyIterator3(terraformExecuteResults)).flat());
+    let step0Import = iterateBlocks(container, GCP_NEXT_JS, applyIteratorStep1).flat();
+    const emptyApplies = makeEmptyExecuteDatabags(container, state);
+    if (emptyApplies.length !== 0) {
+      step0Import.push({
+        name: "gcp_next_js_empty_apply",
+        url: TERRAFORM_EXECUTE_URL,
+        input: emptyApplies
+      });
+    }
+    const gcpProjectSetupResults = importComponents(container, step0Import);
+    const step1 = iterateBlocks(container, GCP_NEXT_JS, applyIteratorStep2(gcpProjectSetupResults)).flat();
+    exportDatabags(emptyExecutePostProcess(container, gcpProjectSetupResults, GCP_NEXT_JS, CREATED_TF_STATE_KEY));
+    applyTransformers(step1.map((db) => db.databags).flat());
+    const terraformExecuteResults = importComponents(container, step1.map((db) => db.imports).flat());
+    applyTransformers(iterateBlocks(container, GCP_NEXT_JS, applyIteratorStep3(gcpProjectSetupResults, terraformExecuteResults)).flat());
   }
   function destroyIterator1(bag) {
     if (!bag.Value) {
       return [];
     }
-    return [{
-      Type: "terraform_execute",
-      Name: `aws_cloudfront_static_hosting_destroy_${bag.Name}`,
-      Value: {
-        display_name: `Terraform destroy - aws_cloudfront_static_hosting.${bag.Name}`,
-        mode: "destroy",
-        dir: `${outputDir}/aws_cf_static_hosting_${bag.Name}`
-      }
-    }];
+    return [
+      makeGcpProjectSetupImport(bag, ...applyDefaults(container, bag.Value))
+    ];
   }
-  function destroyIterator2(bag) {
+  var destroyIterator2 = (gcpProjectSetupResults) => (bag) => {
+    if (!bag.Value) {
+      return [];
+    }
+    const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value).project_name);
+    return [{
+      name: `gcp_next_js_destroy_${bag.Name}`,
+      url: TERRAFORM_EXECUTE_URL,
+      input: [{
+        Type: "terraform_execute",
+        Name: `gcp_next_js_destroy_${bag.Name}`,
+        Value: {
+          display_name: `Terraform destroy - gcp_next_js.${bag.Name}`,
+          mode: "destroy",
+          dir: `${outputDir}/gcp_next_js_${bag.Name}`,
+          variable_values: [{
+            key: "gcp_project",
+            value: gcpProjectName
+          }]
+        }
+      }]
+    }];
+  };
+  function destroyIterator3(bag) {
     if (!bag.Value) {
       return [];
     }
@@ -1186,19 +1131,24 @@ exports.handler = (event, context, callback) => {
     ];
   }
   function destroy() {
-    let step0Import = {
-      name: "aws_cloudfront_static_hosting_destroy",
-      url: TERRAFORM_EXECUTE_URL,
-      input: [
-        ...iterateBlocks(container, AWS_CLOUDFRONT_STATIC_HOSTING, destroyIterator1).flat(),
-        ...makeEmptyExecuteDatabags(container, state)
-      ]
-    };
-    const results = importComponents(container, [step0Import]);
-    exportDatabags(emptyExecutePostProcess(container, results, AWS_CLOUDFRONT_STATIC_HOSTING, CREATED_TF_STATE_KEY));
-    exportDatabags(iterateBlocks(container, AWS_CLOUDFRONT_STATIC_HOSTING, destroyIterator2).flat());
+    let step0Import = iterateBlocks(container, GCP_NEXT_JS, destroyIterator1).flat();
+    const emptyApplies = makeEmptyExecuteDatabags(container, state);
+    if (emptyApplies.length !== 0) {
+      step0Import.push({
+        name: "gcp_next_js_empty_apply_destroy",
+        url: TERRAFORM_EXECUTE_URL,
+        input: emptyApplies
+      });
+    }
+    const gcpProjectSetupResults = importComponents(container, step0Import);
+    exportDatabags(emptyExecutePostProcess(container, gcpProjectSetupResults, GCP_NEXT_JS, CREATED_TF_STATE_KEY));
+    importComponents(container, iterateBlocks(container, GCP_NEXT_JS, destroyIterator2(gcpProjectSetupResults)).flat());
+    exportDatabags(iterateBlocks(container, GCP_NEXT_JS, destroyIterator3).flat());
   }
   switch (barbeLifecycleStep()) {
+    case "pre_generate":
+      preGenerate();
+      break;
     case "generate":
       generate();
       break;

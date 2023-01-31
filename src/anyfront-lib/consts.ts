@@ -5,6 +5,7 @@ export const GCP_CLOUDRUN_STATIC_HOSTING = 'gcp_cloudrun_static_hosting'
 export const AWS_CLOUDFRONT_STATIC_HOSTING = 'aws_cloudfront_static_hosting'
 export const STATIC_HOSTING = 'static_hosting'
 export const AWS_NEXT_JS = 'aws_next_js'
+export const GCP_NEXT_JS = 'gcp_next_js'
 
 
 const BARBE_SLS_VERSION = 'v0.1.1'

@@ -11,6 +11,7 @@ async function main() {
             'frontend_build/frontend_build.ts',
             'gcp_cloudrun_static_hosting/gcp_cloudrun_static_hosting.ts',
             'aws_cloudfront_static_hosting/aws_cloudfront_static_hosting.ts',
+            'gcp_next_js/gcp_next_js.ts',
         ],
         bundle: true,
         // minify: true,

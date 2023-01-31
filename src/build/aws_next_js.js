@@ -1182,6 +1182,41 @@
     exportDatabags(step2Result.map((db) => db.databags).flat());
     importComponents(container, step2Result.map((db) => db.imports).flat());
   }
+  function destroyIterator1(bag) {
+    if (!bag.Value) {
+      return [];
+    }
+    return [{
+      Type: "terraform_execute",
+      Name: `aws_next_js_destroy_${bag.Name}`,
+      Value: {
+        display_name: `Terraform destroy - aws_next_js.${bag.Name}`,
+        mode: "destroy",
+        dir: `${outputDir}/aws_next_js_${bag.Name}`
+      }
+    }];
+  }
+  function destroyIterator2(bag) {
+    if (!bag.Value) {
+      return [];
+    }
+    return [
+      BarbeState.deleteFromObject(CREATED_TF_STATE_KEY, bag.Name)
+    ];
+  }
+  function destroy() {
+    let step0Import = {
+      name: "aws_next_js_destroy",
+      url: TERRAFORM_EXECUTE_URL,
+      input: [
+        ...iterateBlocks(container, AWS_NEXT_JS, destroyIterator1).flat(),
+        ...makeEmptyExecuteDatabags(container, state)
+      ]
+    };
+    const results = importComponents(container, [step0Import]);
+    exportDatabags(emptyExecutePostProcess(container, results, AWS_NEXT_JS, CREATED_TF_STATE_KEY));
+    exportDatabags(iterateBlocks(container, AWS_NEXT_JS, destroyIterator2).flat());
+  }
   switch (barbeLifecycleStep()) {
     case "pre_generate":
       preGenerate();
@@ -1191,6 +1226,9 @@
       break;
     case "apply":
       apply();
+      break;
+    case "destroy":
+      destroy();
       break;
   }
 })();

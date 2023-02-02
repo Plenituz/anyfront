@@ -70,7 +70,7 @@ export function emptyExecutePostProcess(container: DatabagContainer, results: Da
     return output
 }
 
-export function prependTfStateFileName(container: DatabagContainer, prefix: string): SyntaxToken {
+export function prependTfStateFileName(container: DatabagContainer, prefix: string): SyntaxToken | undefined {
     const visitor = (token: SyntaxToken): SyntaxToken | null => {
         if(token.Type === 'literal_value' && typeof token.Value === 'string' && token.Value.includes('.tfstate')) {
             return {
@@ -80,6 +80,9 @@ export function prependTfStateFileName(container: DatabagContainer, prefix: stri
             }
         }
         return null
+    }
+    if(!container['cr_[terraform]']) { 
+        return 
     }
     return visitTokens(container['cr_[terraform]'][''][0].Value!, visitor)
 }

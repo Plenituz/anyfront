@@ -107,9 +107,6 @@
         throw new Error(`cannot turn token type '${token.Type}' into a value`);
     }
   }
-  function asValArrayConst(token) {
-    return asVal(token).map((item) => asVal(item));
-  }
   function asSyntax(token) {
     if (typeof token === "object" && token !== null && token.hasOwnProperty("Type") && token.Type in SyntaxTokenTypes) {
       return token;
@@ -159,11 +156,9 @@
     };
   }
   function concatStrArr(token) {
-    const arr = asValArrayConst(token);
-    const parts = arr.map((item) => asTemplateStr(item).Parts || []).flat();
     return {
       Type: "template",
-      Parts: parts
+      Parts: asTemplateStr(token.ArrayConst || []).Parts?.flat() || []
     };
   }
   function iterateAllBlocks(container2, func) {
@@ -301,7 +296,7 @@
     }
     const [block, _] = applyDefaults(container, bag.Value);
     const awsCreds = getAwsCreds();
-    const deleteArg = block.delete && asVal(block.delete) ? "--delete" : "";
+    const deleteArg = block.delete && asVal(block.delete) ? " --delete" : "";
     return [{
       Type: "buildkit_run_in_container",
       Name: `aws_s3_sync_${bag.Name}`,
@@ -309,7 +304,7 @@
         no_cache: true,
         display_name: block.display_name,
         dockerfile: `
-                FROM amazon/aws-cli:%(aws_cli_version)s
+                FROM amazon/aws-cli:latest
 
                 ENV AWS_ACCESS_KEY_ID="${awsCreds.access_key_id}"
                 ENV AWS_SECRET_ACCESS_KEY="${awsCreds.secret_access_key}"

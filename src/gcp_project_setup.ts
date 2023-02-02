@@ -1,7 +1,8 @@
-import { readDatabagContainer, barbeLifecycleStep, exportDatabags, iterateBlocks, Databag, SugarCoatedDatabag, asTraversal, asFuncCall, asValArrayConst, asBlock, visitTokens, SyntaxToken, BarbeState, barbeOutputDir, importComponents, asVal, DatabagContainer } from '../../barbe-serverless/src/barbe-std/utils';
+import { readDatabagContainer, barbeLifecycleStep, exportDatabags, iterateBlocks, Databag, SugarCoatedDatabag, asTraversal, asFuncCall, asValArrayConst, asBlock, BarbeState, barbeOutputDir, importComponents, asVal, asStr } from '../../barbe-serverless/src/barbe-std/utils';
 import { applyDefaults, preConfCloudResourceFactory } from '../../barbe-serverless/src/barbe-sls-lib/lib';
-import { GCP_PROJECT_SETUP, TERRAFORM_EXECUTE_URL } from './anyfront-lib/consts';
-import { emptyExecuteTemplate, emptyExecuteBagNamePrefix, prependTfStateFileName, emptyExecutePostProcess } from './anyfront-lib/lib';
+import { GCP_PROJECT_SETUP, GCP_PROJECT_SETUP_GET_INFO, TERRAFORM_EXECUTE_URL } from './anyfront-lib/consts';
+import { emptyExecuteTemplate, prependTfStateFileName, emptyExecutePostProcess } from './anyfront-lib/lib';
+import { TERRAFORM_EXECUTE_GET_OUTPUT } from '../../barbe-serverless/src/barbe-sls-lib/consts';
 
 const container = readDatabagContainer()
 const state = BarbeState.readState()
@@ -26,10 +27,6 @@ function gcpProjectSetupGenerateIterator(bag: Databag): (Databag | SugarCoatedDa
         return []
     }
     const [block, _] = applyDefaults(container, bag.Value);
-    if(BarbeState.getObjectValue(state, CREATED_TF_STATE_KEY, bag.Name)) {
-        // already created, skip
-        return []
-    }
 
     const dir = `gcp_project_setup_${bag.Name}`
     const bagPreconf = {
@@ -94,7 +91,7 @@ function gcpProjectSetupGenerateIterator(bag: Databag): (Databag | SugarCoatedDa
         } else {
             localDatabags.push(
                 cloudData('google_project', 'project', {
-                    project: block.project_id
+                    project_id: block.project_id
                 }),
                 cloudOutput('', 'project_name', {
                     value: asFuncCall('replace', [
@@ -136,7 +133,7 @@ function gcpProjectSetupApplyIterator(bag: Databag): (Databag | SugarCoatedDatab
         return []
     }
     if(BarbeState.getObjectValue(state, CREATED_TF_STATE_KEY, bag.Name)) {
-        // already created, skip
+        // already created, skip. Note: only skip in apply, generate should still happen
         return []
     }
     return [{
@@ -177,22 +174,25 @@ function gcpProjectSetupApply() {
         if(!results.terraform_execute_output[`gcp_setup_${bag.Name}`]) {
             return []
         }
-        const projectName = asVal(asVal(results.terraform_execute_output[`gcp_setup_${bag.Name}`][0].Value!).value)
-        return [
-            BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-                [bag.Name]: prependTfStateFileName(container, `_gcp_project_setup_${bag.Name}`)
-            }),
-            BarbeState.putInObject(CREATED_PROJECT_NAME_KEY, {
-                [bag.Name]: projectName
-            }),
-            {
-                Type: 'gcp_project_setup_output',
-                Name: bag.Name,
-                Value: {
-                    project_name: projectName
-                }
+        const projectName = asStr(asVal(asVal(results.terraform_execute_output[`gcp_setup_${bag.Name}`][0].Value!)[0]).value)
+        let databags: SugarCoatedDatabag[] = [{
+            Type: 'gcp_project_setup_output',
+            Name: bag.Name,
+            Value: {
+                project_name: projectName
             }
-        ]
+        }]
+        if(container['cr_[terraform]']) {
+            databags.push(
+                BarbeState.putInObject(CREATED_TF_STATE_KEY, {
+                    [bag.Name]: prependTfStateFileName(container, `_gcp_project_setup_${bag.Name}`)
+                }),
+                BarbeState.putInObject(CREATED_PROJECT_NAME_KEY, {
+                    [bag.Name]: projectName
+                }),
+            )
+        }
+        return databags
     }
 
     let databags: SugarCoatedDatabag[] = [
@@ -254,6 +254,51 @@ function gcpProjectSetupDestroy() {
     exportDatabags(databags)
 }
 
+function gcpProjectSetupGetInfoIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] {
+    return [{
+        Type: TERRAFORM_EXECUTE_GET_OUTPUT,
+        Name: `gcp_setup_get_output_${bag.Name}`,
+        Value: {
+            display_name: `Terraform output - gcp_project_setup.${bag.Name}`,
+            dir: `${outputDir}/gcp_project_setup_${bag.Name}`
+        }
+    }]
+}
+
+function getInfo() {
+    const results = importComponents(container, [{
+        name: `gcp_project_setup_get_info_${barbeLifecycleStep()}`,
+        url: TERRAFORM_EXECUTE_URL,
+        input: iterateBlocks(container, GCP_PROJECT_SETUP_GET_INFO, gcpProjectSetupGetInfoIterator).flat()
+    }])
+
+    const resultsIterator = (bag: Databag): (Databag | SugarCoatedDatabag)[] => {
+        if(!bag.Value) {
+            return []
+        }
+        if(!results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`] || 
+            !results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0] ||
+            !results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value ||
+            !asVal(results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value!)[0]) {
+            return []
+        }
+        const projectName = asStr(asVal(asVal(results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value!)[0]).value)
+        let databags: SugarCoatedDatabag[] = [{
+            Type: 'gcp_project_setup_output',
+            Name: bag.Name,
+            Value: {
+                project_name: projectName
+            }
+        }]
+        return databags
+    }
+
+    if(results.terraform_execute_output) {
+        exportDatabags(iterateBlocks(container, GCP_PROJECT_SETUP_GET_INFO, resultsIterator).flat())
+    }
+}
+
+getInfo()
 switch(barbeLifecycleStep()) {
     case 'generate':
         exportDatabags(iterateBlocks(container, GCP_PROJECT_SETUP, gcpProjectSetupGenerateIterator).flat())

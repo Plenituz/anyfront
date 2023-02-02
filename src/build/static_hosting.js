@@ -387,9 +387,6 @@
         throw new Error(`cannot turn token type '${token.Type}' into a value`);
     }
   }
-  function asValArrayConst(token) {
-    return asVal(token).map((item) => asVal(item));
-  }
   function asSyntax(token) {
     if (typeof token === "object" && token !== null && token.hasOwnProperty("Type") && token.Type in SyntaxTokenTypes) {
       return token;
@@ -439,11 +436,9 @@
     };
   }
   function concatStrArr(token) {
-    const arr = asValArrayConst(token);
-    const parts = arr.map((item) => asTemplateStr(item).Parts || []).flat();
     return {
       Type: "template",
-      Parts: parts
+      Parts: asTemplateStr(token.ArrayConst || []).Parts?.flat() || []
     };
   }
   function appendToTemplate(source, toAdd) {
@@ -585,9 +580,6 @@
   function barbeLifecycleStep() {
     return os.getenv("BARBE_LIFECYCLE_STEP");
   }
-  function barbeCommand() {
-    return os.getenv("BARBE_COMMAND");
-  }
   function uniq(arr, key) {
     const seen = /* @__PURE__ */ new Set();
     return arr.filter((item) => {
@@ -674,7 +666,7 @@
     const gcpIterator = (bag, block, namePrefix) => {
       const hash = computeBagBuildHash(bag);
       const buildOutputDir = buildOutputDirs[hash];
-      if (!buildOutputDir) {
+      if (!buildOutputDir && barbeLifecycleStep() !== "destroy") {
         throw new Error(`static_hosting.${bag.Name} has no build output dir, this is a bug, please report it`);
       }
       const dotGcpProject = compileBlockParam(block, "google_cloud_project");
@@ -683,6 +675,7 @@
         Type: GCP_CLOUDRUN_STATIC_HOSTING,
         Name: bag.Name,
         Value: {
+          name_prefix: [`${bag.Name}-`],
           root_object: block.root_object,
           region: block.region || "us-central1",
           project_id: dotGcpProject.project_id || block.google_cloud_project_id,
@@ -701,7 +694,7 @@
     const awsIterator = (bag, block, namePrefix) => {
       const hash = computeBagBuildHash(bag);
       const buildOutputDir = buildOutputDirs[hash];
-      if (!buildOutputDir) {
+      if (!buildOutputDir && barbeLifecycleStep() !== "destroy") {
         throw new Error(`static_hosting.${bag.Name} has no build output dir, this is a bug, please report it`);
       }
       const dotDomain = compileBlockParam(block, "domain");
@@ -709,9 +702,10 @@
         Type: AWS_CLOUDFRONT_STATIC_HOSTING,
         Name: bag.Name,
         Value: {
+          name_prefix: [`${bag.Name}-`],
           root_object: block.root_object,
           region: block.region || os.getenv("AWS_REGION") || "us-east-1",
-          zone: block.zone,
+          zone: dotDomain.zone,
           domain_names: dotDomain.name ? [dotDomain.name] : void 0,
           certificate_domain_to_create: dotDomain.name,
           build_dir: buildOutputDir
@@ -726,7 +720,7 @@
     let imports = [];
     if (gcpStaticHostings.length > 0) {
       imports.push({
-        name: "static_hosting_gcp_generate",
+        name: `static_hosting_gcp_${barbeLifecycleStep()}`,
         url: GCP_CLOUDRUN_STATIC_HOSTING_URL,
         copyFromContainer: ["default", "cr_[terraform]"],
         input: gcpStaticHostings
@@ -734,9 +728,9 @@
     }
     if (awsStaticHostings.length > 0) {
       imports.push({
-        name: "static_hosting_aws_generate",
+        name: `static_hosting_aws_${barbeLifecycleStep()}`,
         url: AWS_CLOUDFRONT_STATIC_HOSTING_URL,
-        copyFromContainer: ["default", "cf_[terraform]"],
+        copyFromContainer: ["default", "cr_[terraform]"],
         input: awsStaticHostings
       });
     }
@@ -755,7 +749,7 @@
         Type: "state_store",
         Name: "",
         Value: {
-          name_prefix: [block.name_prefix ? namePrefix : appendToTemplate(namePrefix, [`${bag.Name}-`])],
+          name_prefix: [`${bag.Name}-`],
           gcs: asBlock([{
             project_id: dotGcpProject.project_id || block.google_cloud_project_id
           }])
@@ -768,7 +762,7 @@
         Type: "state_store",
         Name: "",
         Value: {
-          name_prefix: [block.name_prefix ? namePrefix : appendToTemplate(namePrefix, [`${bag.Name}-`])],
+          name_prefix: [`${bag.Name}-`],
           s3: asBlock([{}])
         }
       };
@@ -797,9 +791,6 @@
     `);
   }
   function generate() {
-    if (barbeCommand() === "destroy") {
-      return;
-    }
     const uniqueBagAndHashes = uniq(
       iterateBlocks(container, STATIC_HOSTING, (bag) => ({ hash: computeBagBuildHash(bag), bag })),
       (x) => x.hash
@@ -829,15 +820,21 @@
         }
       });
     }
+    if (frontEndBuildReqs.length === 0) {
+      return;
+    }
     const frontendBuildResults = importComponents(container, [{
       name: "static_hosting_generate",
       url: FRONTEND_BUILD_URL,
       input: frontEndBuildReqs
     }]);
     iterateBlocks(frontendBuildResults, "frontend_build_output", (bag) => buildOutputDirs[bag.Name] = asStr(bag.Value));
+    if (Object.keys(buildOutputDirs).length === 0) {
+      return;
+    }
     const imports = makeSubImports(container, buildOutputDirs);
     if (imports.length > 0) {
-      importComponents(container, imports);
+      exportDatabags(importComponents(container, imports));
     }
     exportDatabags([{
       Type: "static_hosting_build_dir_map",
@@ -848,9 +845,11 @@
   function relayToSubComponents() {
     const tmp = container.static_hosting_build_dir_map?.[""]?.[0]?.Value;
     if (!tmp) {
-      throw new Error(`static_hosting_build_dir_map is missing, this is a bug, please report it`);
+      console.log("no static_hosting_build_dir_map found, skipping relayToSubComponents");
+      return;
     }
-    const buildOutputDirs = asVal(tmp);
+    let buildOutputDirs = asVal(tmp);
+    Object.keys(buildOutputDirs).forEach((key) => buildOutputDirs[key] = asStr(buildOutputDirs[key]));
     const imports = makeSubImports(container, buildOutputDirs);
     if (imports.length > 0) {
       importComponents(container, imports);

@@ -1,6 +1,6 @@
-import { readDatabagContainer, barbeLifecycleStep, DatabagContainer, SyntaxToken, iterateBlocks, asStr, appendToTemplate, Databag, asBlock, SugarCoatedDatabag, exportDatabags, barbeCommand, asSyntax, asVal, uniq, ImportComponentInput, importComponents } from '../../barbe-serverless/src/barbe-std/utils';
+import { readDatabagContainer, barbeLifecycleStep, DatabagContainer, SyntaxToken, iterateBlocks, asStr, appendToTemplate, Databag, asBlock, SugarCoatedDatabag, exportDatabags, asSyntax, asVal, uniq, ImportComponentInput, importComponents } from '../../barbe-serverless/src/barbe-std/utils';
 import { applyDefaults, DatabagObjVal, compileBlockParam } from '../../barbe-serverless/src/barbe-sls-lib/lib';
-import { STATIC_HOSTING, FRONTEND_BUILD, FRONTEND_BUILD_URL, GCP_CLOUDRUN_STATIC_HOSTING, AWS_CLOUDFRONT_STATIC_HOSTING, GCP_CLOUDRUN_STATIC_HOSTING_URL, AWS_CLOUDFRONT_STATIC_HOSTING_URL } from './anyfront-lib/consts';
+import { STATIC_HOSTING, FRONTEND_BUILD_URL, GCP_CLOUDRUN_STATIC_HOSTING, AWS_CLOUDFRONT_STATIC_HOSTING, GCP_CLOUDRUN_STATIC_HOSTING_URL, AWS_CLOUDFRONT_STATIC_HOSTING_URL } from './anyfront-lib/consts';
 import md5 from 'md5';
 
 
@@ -28,7 +28,7 @@ function makeSubDatabags(container: DatabagContainer, buildOutputDirs: {[hash: s
     const gcpIterator = (bag: Databag, block: DatabagObjVal, namePrefix: SyntaxToken): void => {
         const hash = computeBagBuildHash(bag)
         const buildOutputDir = buildOutputDirs[hash]
-        if(!buildOutputDir) {
+        if(!buildOutputDir && barbeLifecycleStep() !== 'destroy') {
             throw new Error(`static_hosting.${bag.Name} has no build output dir, this is a bug, please report it`)
         }
         const dotGcpProject = compileBlockParam(block, 'google_cloud_project')
@@ -38,6 +38,7 @@ function makeSubDatabags(container: DatabagContainer, buildOutputDirs: {[hash: s
             Type: GCP_CLOUDRUN_STATIC_HOSTING,
             Name: bag.Name,
             Value: {
+                name_prefix: [`${bag.Name}-`],
                 root_object: block.root_object,
                 region: block.region || 'us-central1',
                 project_id: dotGcpProject.project_id || block.google_cloud_project_id,
@@ -56,7 +57,7 @@ function makeSubDatabags(container: DatabagContainer, buildOutputDirs: {[hash: s
     const awsIterator = (bag: Databag, block: DatabagObjVal, namePrefix: SyntaxToken): void => {
         const hash = computeBagBuildHash(bag)
         const buildOutputDir = buildOutputDirs[hash]
-        if(!buildOutputDir) {
+        if(!buildOutputDir && barbeLifecycleStep() !== 'destroy') {
             throw new Error(`static_hosting.${bag.Name} has no build output dir, this is a bug, please report it`)
         }
         const dotDomain = compileBlockParam(block, 'domain')
@@ -65,9 +66,10 @@ function makeSubDatabags(container: DatabagContainer, buildOutputDirs: {[hash: s
             Type: AWS_CLOUDFRONT_STATIC_HOSTING,
             Name: bag.Name,
             Value: {
+                name_prefix: [`${bag.Name}-`],
                 root_object: block.root_object,
                 region: block.region || os.getenv('AWS_REGION') || 'us-east-1',
-                zone: block.zone,
+                zone: dotDomain.zone,
                 domain_names: dotDomain.name ? [dotDomain.name] : undefined,
                 certificate_domain_to_create: dotDomain.name,
                 build_dir: buildOutputDir,
@@ -83,7 +85,7 @@ function makeSubImports(container: DatabagContainer, buildOutputDirs: {[hash: st
     let imports: ImportComponentInput[] = []
     if(gcpStaticHostings.length > 0) {
         imports.push({
-            name: 'static_hosting_gcp_generate',
+            name: `static_hosting_gcp_${barbeLifecycleStep()}`,
             url: GCP_CLOUDRUN_STATIC_HOSTING_URL,
             copyFromContainer: ["default", "cr_[terraform]"],
             input: gcpStaticHostings
@@ -91,9 +93,9 @@ function makeSubImports(container: DatabagContainer, buildOutputDirs: {[hash: st
     }
     if(awsStaticHostings.length > 0) {
         imports.push({
-            name: 'static_hosting_aws_generate',
+            name: `static_hosting_aws_${barbeLifecycleStep()}`,
             url: AWS_CLOUDFRONT_STATIC_HOSTING_URL,
-            copyFromContainer: ["default", "cf_[terraform]"],
+            copyFromContainer: ["default", "cr_[terraform]"],
             input: awsStaticHostings
         })
     }
@@ -114,7 +116,7 @@ function preGenerate() {
             Type: 'state_store',
             Name: '',
             Value: {
-                name_prefix: [block.name_prefix ? namePrefix : appendToTemplate(namePrefix, [`${bag.Name}-`])],
+                name_prefix: [`${bag.Name}-`],
                 gcs: asBlock([{
                     project_id: dotGcpProject.project_id || block.google_cloud_project_id
                 }])
@@ -128,7 +130,7 @@ function preGenerate() {
             Type: 'state_store',
             Name: '',
             Value: {
-                name_prefix: [block.name_prefix ? namePrefix : appendToTemplate(namePrefix, [`${bag.Name}-`])],
+                name_prefix: [`${bag.Name}-`],
                 s3: asBlock([{}])
             }
         }
@@ -164,10 +166,6 @@ function computeBagBuildHash(bag: Databag): string {
 }
 
 function generate() {
-    if(barbeCommand() === 'destroy') {
-        //this step only does the frontend build, which isnt needed for destroy
-        return
-    }
     const uniqueBagAndHashes = uniq(
         iterateBlocks(container, STATIC_HOSTING, (bag) => ({ hash: computeBagBuildHash(bag), bag })),
         x => x.hash
@@ -198,16 +196,22 @@ function generate() {
             }
         })
     }
+    if(frontEndBuildReqs.length === 0) {
+        return
+    }
     const frontendBuildResults = importComponents(container, [{
         name: 'static_hosting_generate',
         url: FRONTEND_BUILD_URL,
         input: frontEndBuildReqs
     }])
     iterateBlocks(frontendBuildResults, 'frontend_build_output', (bag) => buildOutputDirs[bag.Name] = asStr(bag.Value!))
-    
+    if(Object.keys(buildOutputDirs).length === 0) {
+        return
+    }
+
     const imports = makeSubImports(container, buildOutputDirs)
     if(imports.length > 0) {
-        importComponents(container, imports)
+        exportDatabags(importComponents(container, imports))
     }
     exportDatabags([{
         Type: 'static_hosting_build_dir_map',
@@ -219,9 +223,12 @@ function generate() {
 function relayToSubComponents() {
     const tmp = container.static_hosting_build_dir_map?.['']?.[0]?.Value
     if(!tmp) {
-        throw new Error(`static_hosting_build_dir_map is missing, this is a bug, please report it`)
+        console.log('no static_hosting_build_dir_map found, skipping relayToSubComponents')
+        return
     }
-    const buildOutputDirs = asVal(tmp)
+    let buildOutputDirs = asVal(tmp)
+    Object.keys(buildOutputDirs).forEach(key => buildOutputDirs[key] = asStr(buildOutputDirs[key]));
+
     const imports = makeSubImports(container, buildOutputDirs)
     if(imports.length > 0) {
         importComponents(container, imports)

@@ -10,7 +10,7 @@ function awsS3SyncFilesIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] 
     }
     const [block, _] = applyDefaults(container, bag.Value)
     const awsCreds = getAwsCreds();
-    const deleteArg = block.delete && asVal(block.delete) ? '--delete' : ''
+    const deleteArg = block.delete && asVal(block.delete) ? ' --delete' : ''
 
     return [{
         Type: 'buildkit_run_in_container',
@@ -19,7 +19,7 @@ function awsS3SyncFilesIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] 
             no_cache: true,
             display_name: block.display_name,
             dockerfile: `
-                FROM amazon/aws-cli:%(aws_cli_version)s
+                FROM amazon/aws-cli:latest
 
                 ENV AWS_ACCESS_KEY_ID="${awsCreds.access_key_id}"
                 ENV AWS_SECRET_ACCESS_KEY="${awsCreds.secret_access_key}"

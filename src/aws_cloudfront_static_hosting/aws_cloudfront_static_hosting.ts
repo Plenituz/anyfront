@@ -2,8 +2,7 @@ import { readDatabagContainer, barbeLifecycleStep, Databag, SugarCoatedDatabag, 
 import { applyDefaults, applyMixins, getAwsCreds, preConfCloudResourceFactory } from '../../../barbe-serverless/src/barbe-sls-lib/lib';
 import lister_go from './lister.go';
 import base_script from './origin_request.template.js';
-import { DBAndImport, emptyExecuteBagNamePrefix, emptyExecutePostProcess, emptyExecuteTemplate, prependTfStateFileName } from '../anyfront-lib/lib';
-import md5 from 'md5';
+import { DBAndImport, emptyExecutePostProcess, emptyExecuteTemplate, prependTfStateFileName } from '../anyfront-lib/lib';
 import { AWS_CLOUDFRONT_STATIC_HOSTING, AWS_IAM_URL, AWS_LAMBDA_URL, AWS_S3_SYNC_FILES, AWS_S3_SYNC_URL, TERRAFORM_EXECUTE_URL } from '../anyfront-lib/consts';
 import { AWS_IAM_LAMBDA_ROLE, AWS_FUNCTION } from '../../../barbe-serverless/src/barbe-sls-lib/consts';
 
@@ -39,11 +38,12 @@ function generateIterator1(bag: Databag): DBAndImport[] {
     }
     const rootObj = block.root_object || 'index.html'
     const domainNames: SyntaxToken[] = asVal(block.domain_names || asSyntax([]))
-    const cloudResource = preConfCloudResourceFactory(block, 'resource', undefined, bagPreconf)
-    const cloudData = preConfCloudResourceFactory(block, 'data', undefined, bagPreconf)
-    const cloudOutput = preConfCloudResourceFactory(block, 'output', undefined, bagPreconf)
-    const cloudProvider = preConfCloudResourceFactory(block, 'provider', undefined, bagPreconf)
-    const cloudTerraform = preConfCloudResourceFactory(block, 'terraform', undefined, bagPreconf)
+    const noProvider = { provider: undefined }
+    const cloudResource = preConfCloudResourceFactory(block, 'resource', noProvider, bagPreconf)
+    const cloudData = preConfCloudResourceFactory(block, 'data', noProvider, bagPreconf)
+    const cloudOutput = preConfCloudResourceFactory(block, 'output', noProvider, bagPreconf)
+    const cloudProvider = preConfCloudResourceFactory(block, 'provider', noProvider, bagPreconf)
+    const cloudTerraform = preConfCloudResourceFactory(block, 'terraform', noProvider, bagPreconf)
 
     const acmCertificateResources = (domain: SyntaxToken): SugarCoatedDatabag[] => {
         return [
@@ -87,7 +87,7 @@ function generateIterator1(bag: Databag): DBAndImport[] {
     const staticFileDistrib = () => {
         let localDatabags: SugarCoatedDatabag[] = [
             cloudProvider('', 'aws', {
-                region: block.region || os.getenv("AWS_REGION") || 'us-east-1'
+                region: block.region
             }),
             cloudResource('aws_s3_bucket', 'origin', {
                 bucket: appendToTemplate(namePrefix, ['origin']),
@@ -111,7 +111,7 @@ function generateIterator1(bag: Databag): DBAndImport[] {
             }),
             cloudResource('aws_cloudfront_origin_access_identity', 'origin_access_id', {
                 comment: asTemplate([
-                    'origin access identity for',
+                    'origin access identity for ',
                     appendToTemplate(namePrefix, ['origin'])
                 ])
             }),
@@ -318,7 +318,7 @@ function generateIterator1(bag: Databag): DBAndImport[] {
                     cloudresource_dir: dir,
                     cloudresource_id: dir,
                     assumable_by: ["edgelambda.amazonaws.com", "lambda.amazonaws.com"],
-                    name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])],
+                    name_prefix: [namePrefix],
                 }
             }]
         },
@@ -342,7 +342,7 @@ function generateIterator1(bag: Databag): DBAndImport[] {
                     handler: "origin_request.handler",
                     runtime: "nodejs16.x",
                     timeout: 30,
-                    name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])],
+                    name_prefix: [namePrefix],
                 }
             }]
         }
@@ -377,11 +377,14 @@ const applyIterator2 = (terraformExecuteResults: DatabagContainer) => (bag: Data
     }
     const [block, namePrefix] = applyDefaults(container, bag.Value)
 
-    let databags: SugarCoatedDatabag[] = [
-        BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-            [bag.Name]: prependTfStateFileName(container, `_aws_cf_static_hosting_${bag.Name}`)
-        })
-    ]
+    let databags: SugarCoatedDatabag[] = []
+    if(container['cr_[terraform]']) {
+        databags.push(
+            BarbeState.putInObject(CREATED_TF_STATE_KEY, {
+                [bag.Name]: prependTfStateFileName(container, `_aws_cf_static_hosting_${bag.Name}`)
+            })
+        )
+    }
     let imports: ImportComponentInput[] = []
     if(terraformExecuteResults.terraform_execute_output?.[`aws_cloudfront_static_hosting_${bag.Name}`]) {
         const outputs = asValArrayConst(terraformExecuteResults.terraform_execute_output[`aws_cloudfront_static_hosting_${bag.Name}`][0].Value!)

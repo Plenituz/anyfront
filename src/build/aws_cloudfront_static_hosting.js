@@ -279,11 +279,9 @@
     };
   }
   function concatStrArr(token) {
-    const arr = asValArrayConst(token);
-    const parts = arr.map((item) => asTemplateStr(item).Parts || []).flat();
     return {
       Type: "template",
-      Parts: parts
+      Parts: asTemplateStr(token.ArrayConst || []).Parts?.flat() || []
     };
   }
   function appendToTemplate(source, toAdd) {
@@ -717,6 +715,9 @@ exports.handler = (event, context, callback) => {
       }
       return null;
     };
+    if (!container2["cr_[terraform]"]) {
+      return;
+    }
     return visitTokens(container2["cr_[terraform]"][""][0].Value, visitor);
   }
 
@@ -766,11 +767,12 @@ exports.handler = (event, context, callback) => {
     };
     const rootObj = block.root_object || "index.html";
     const domainNames = asVal(block.domain_names || asSyntax([]));
-    const cloudResource = preConfCloudResourceFactory(block, "resource", void 0, bagPreconf);
-    const cloudData = preConfCloudResourceFactory(block, "data", void 0, bagPreconf);
-    const cloudOutput = preConfCloudResourceFactory(block, "output", void 0, bagPreconf);
-    const cloudProvider = preConfCloudResourceFactory(block, "provider", void 0, bagPreconf);
-    const cloudTerraform = preConfCloudResourceFactory(block, "terraform", void 0, bagPreconf);
+    const noProvider = { provider: void 0 };
+    const cloudResource = preConfCloudResourceFactory(block, "resource", noProvider, bagPreconf);
+    const cloudData = preConfCloudResourceFactory(block, "data", noProvider, bagPreconf);
+    const cloudOutput = preConfCloudResourceFactory(block, "output", noProvider, bagPreconf);
+    const cloudProvider = preConfCloudResourceFactory(block, "provider", noProvider, bagPreconf);
+    const cloudTerraform = preConfCloudResourceFactory(block, "terraform", noProvider, bagPreconf);
     const acmCertificateResources = (domain) => {
       return [
         cloudResource("aws_acm_certificate", "cert", {
@@ -812,7 +814,7 @@ exports.handler = (event, context, callback) => {
     const staticFileDistrib = () => {
       let localDatabags = [
         cloudProvider("", "aws", {
-          region: block.region || os.getenv("AWS_REGION") || "us-east-1"
+          region: block.region
         }),
         cloudResource("aws_s3_bucket", "origin", {
           bucket: appendToTemplate(namePrefix, ["origin"]),
@@ -836,7 +838,7 @@ exports.handler = (event, context, callback) => {
         }),
         cloudResource("aws_cloudfront_origin_access_identity", "origin_access_id", {
           comment: asTemplate([
-            "origin access identity for",
+            "origin access identity for ",
             appendToTemplate(namePrefix, ["origin"])
           ])
         }),
@@ -1035,7 +1037,7 @@ exports.handler = (event, context, callback) => {
             cloudresource_dir: dir,
             cloudresource_id: dir,
             assumable_by: ["edgelambda.amazonaws.com", "lambda.amazonaws.com"],
-            name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])]
+            name_prefix: [namePrefix]
           }
         }]
       },
@@ -1059,7 +1061,7 @@ exports.handler = (event, context, callback) => {
             handler: "origin_request.handler",
             runtime: "nodejs16.x",
             timeout: 30,
-            name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])]
+            name_prefix: [namePrefix]
           }
         }]
       }
@@ -1090,11 +1092,14 @@ exports.handler = (event, context, callback) => {
       return [];
     }
     const [block, namePrefix] = applyDefaults(container, bag.Value);
-    let databags = [
-      BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-        [bag.Name]: prependTfStateFileName(container, `_aws_cf_static_hosting_${bag.Name}`)
-      })
-    ];
+    let databags = [];
+    if (container["cr_[terraform]"]) {
+      databags.push(
+        BarbeState.putInObject(CREATED_TF_STATE_KEY, {
+          [bag.Name]: prependTfStateFileName(container, `_aws_cf_static_hosting_${bag.Name}`)
+        })
+      );
+    }
     let imports = [];
     if (terraformExecuteResults.terraform_execute_output?.[`aws_cloudfront_static_hosting_${bag.Name}`]) {
       const outputs = asValArrayConst(terraformExecuteResults.terraform_execute_output[`aws_cloudfront_static_hosting_${bag.Name}`][0].Value);

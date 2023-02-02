@@ -2,9 +2,9 @@ template {
     manifest = "../../manifest.json"
 }
 
-// default {
-//     // name_prefix = ["react-spa1-"]
-// }
+default {
+    name_prefix = ["react-spa1-"]
+}
 
 static_hosting "my-react-spa" {
     platform = "gcp"

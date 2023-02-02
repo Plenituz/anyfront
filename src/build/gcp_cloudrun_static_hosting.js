@@ -279,11 +279,9 @@
     };
   }
   function concatStrArr(token) {
-    const arr = asValArrayConst(token);
-    const parts = arr.map((item) => asTemplateStr(item).Parts || []).flat();
     return {
       Type: "template",
-      Parts: parts
+      Parts: asTemplateStr(token.ArrayConst || []).Parts?.flat() || []
     };
   }
   function appendToTemplate(source, toAdd) {
@@ -574,6 +572,7 @@
 
   // anyfront-lib/consts.ts
   var GCP_PROJECT_SETUP = "gcp_project_setup";
+  var GCP_PROJECT_SETUP_GET_INFO = "gcp_project_setup_get_info";
   var GCP_CLOUDRUN_STATIC_HOSTING = "gcp_cloudrun_static_hosting";
   var BARBE_SLS_VERSION = "v0.1.1";
   var ANYFRONT_VERSION = "v0.1.1";
@@ -656,6 +655,9 @@
       }
       return null;
     };
+    if (!container2["cr_[terraform]"]) {
+      return;
+    }
     return visitTokens(container2["cr_[terraform]"][""][0].Value, visitor);
   }
 
@@ -750,6 +752,7 @@ CMD sh -c "nginx -g 'daemon off;'"`;
                 image: asTemplate([
                   "gcr.io/",
                   asTraversal("var.gcp_project"),
+                  "/",
                   appendToTemplate(namePrefix, [`sh-${bag.Name}`]),
                   ":latest"
                 ])
@@ -991,18 +994,21 @@ CMD sh -c "nginx -g 'daemon off;'"`;
     if (!bag.Value) {
       return [];
     }
-    let databags = [
-      BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-        [bag.Name]: prependTfStateFileName(container, `_gcp_cr_static_hosting_${bag.Name}`)
-      })
-    ];
+    let databags = [];
+    if (container["cr_[terraform]"]) {
+      databags.push(
+        BarbeState.putInObject(CREATED_TF_STATE_KEY, {
+          [bag.Name]: prependTfStateFileName(container, `_gcp_cr_static_hosting_${bag.Name}`)
+        })
+      );
+    }
     if (!terraformExecuteResults.terraform_execute_output?.[`gcp_cloudrun_static_hosting_apply_${bag.Name}`]) {
       return databags;
     }
     const [block, namePrefix] = applyDefaults(container, bag.Value);
     const tfOutput = asValArrayConst(terraformExecuteResults.terraform_execute_output[`gcp_cloudrun_static_hosting_apply_${bag.Name}`][0].Value);
-    const cloudrunServiceName = asStr(tfOutput.find((pair) => asStr(pair.key) === "cloudrun_service_name"));
-    const urlMapName = asStr(tfOutput.find((pair) => asStr(pair.key) === "load_balancer_url_map"));
+    const cloudrunServiceName = asStr(tfOutput.find((pair) => asStr(pair.key) === "cloudrun_service_name").value);
+    const urlMapName = asStr(tfOutput.find((pair) => asStr(pair.key) === "load_balancer_url_map").value);
     const imageName = asStr(appendToTemplate(namePrefix, ["sh-", bag.Name]));
     const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value).project_name);
     const gcpToken = getGcpToken();
@@ -1042,6 +1048,16 @@ CMD sh -c "nginx -g 'daemon off;'"`;
     const terraformExecuteResults = importComponents(container, step1.map((db) => db.imports).flat());
     applyTransformers(iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, applyIteratorStep3(gcpProjectSetupResults, terraformExecuteResults)).flat());
   }
+  function destroyIteratorGetGcpProjectInfo(bag) {
+    if (!bag.Value) {
+      return [];
+    }
+    return [{
+      Type: GCP_PROJECT_SETUP_GET_INFO,
+      Name: bag.Name,
+      Value: {}
+    }];
+  }
   function destroyIterator1(bag) {
     if (!bag.Value) {
       return [];
@@ -1052,6 +1068,9 @@ CMD sh -c "nginx -g 'daemon off;'"`;
   }
   var destroyIterator2 = (gcpProjectSetupResults) => (bag) => {
     if (!bag.Value) {
+      return [];
+    }
+    if (!gcpProjectSetupResults.gcp_project_setup_output || !gcpProjectSetupResults.gcp_project_setup_output[bag.Name]) {
       return [];
     }
     const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value).project_name);
@@ -1082,18 +1101,23 @@ CMD sh -c "nginx -g 'daemon off;'"`;
     ];
   }
   function destroy() {
-    let step0Import = iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIterator1).flat();
+    const gcpGetProjectInfoResults = importComponents(container, [{
+      name: "gcp_cr_static_hosting_get_project_info_destroy",
+      url: GCP_PROJECT_SETUP_URL,
+      input: iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIteratorGetGcpProjectInfo).flat()
+    }]);
+    let step1 = iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIterator2(gcpGetProjectInfoResults)).flat();
     const emptyApplies = makeEmptyExecuteDatabags(container, state);
     if (emptyApplies.length !== 0) {
-      step0Import.push({
-        name: "gcp_cloudrun_static_hosting_empty_apply_destroy",
+      step1.push({
+        name: "gcp_cr_static_hosting_empty_apply_destroy",
         url: TERRAFORM_EXECUTE_URL,
         input: emptyApplies
       });
     }
-    const gcpProjectSetupResults = importComponents(container, step0Import);
-    exportDatabags(emptyExecutePostProcess(container, gcpProjectSetupResults, GCP_CLOUDRUN_STATIC_HOSTING, CREATED_TF_STATE_KEY));
-    importComponents(container, iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIterator2(gcpProjectSetupResults)).flat());
+    const emptyExecuteResults = importComponents(container, step1);
+    importComponents(container, iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIterator1).flat());
+    exportDatabags(emptyExecutePostProcess(container, emptyExecuteResults, GCP_CLOUDRUN_STATIC_HOSTING, CREATED_TF_STATE_KEY));
     exportDatabags(iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIterator3).flat());
   }
   switch (barbeLifecycleStep()) {

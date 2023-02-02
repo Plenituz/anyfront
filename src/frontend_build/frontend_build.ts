@@ -1,5 +1,5 @@
 import { applyDefaults, compileBlockParam, applyMixins } from '../../../barbe-serverless/src/barbe-sls-lib/lib';
-import { readDatabagContainer, Databag, SugarCoatedDatabag, asVal, asStr, exportDatabags, iterateBlocks, onlyRunForLifecycleSteps, applyTransformers, DatabagContainer, barbeOutputDir } from '../../../barbe-serverless/src/barbe-std/utils';
+import { readDatabagContainer, Databag, SugarCoatedDatabag, asVal, asStr, exportDatabags, iterateBlocks, onlyRunForLifecycleSteps, applyTransformers, barbeOutputDir } from '../../../barbe-serverless/src/barbe-std/utils';
 import { FRONTEND_BUILD } from "../anyfront-lib/consts";
 import build_script from "./build_script.template.js";
 
@@ -50,16 +50,15 @@ function frontendBuildIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] {
 }
 
 const results = applyTransformers(iterateBlocks(container, FRONTEND_BUILD, frontendBuildIterator).flat())
-
 const frontendBuildResultIterator = (bag: Databag): (Databag | SugarCoatedDatabag)[] => {
     if(!bag.Value) {
         return []
     }
     const outputResult = results?.frontend_build_output?.[bag.Name]?.[0]?.Value
     if(!outputResult) {
-        throw new Error(`No output found for frontend build '${bag.Name}'`)
+        return []
     }
-    const output = asVal(outputResult)
+    const output = asVal(outputResult!)
     if(output.error) {
         const errStr = asStr(output.error)
         switch(errStr) {
@@ -79,7 +78,6 @@ const frontendBuildResultIterator = (bag: Databag): (Databag | SugarCoatedDataba
         Value: `${outputDir}/frontend_build_${bag.Name}`
     }]
 }
-
 
 exportDatabags(iterateBlocks(container, FRONTEND_BUILD, frontendBuildResultIterator).flat())
 

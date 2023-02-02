@@ -1,6 +1,7 @@
 export const AWS_S3_SYNC_FILES = 'aws_s3_sync_files'
 export const FRONTEND_BUILD = 'frontend_build'
 export const GCP_PROJECT_SETUP = 'gcp_project_setup'
+export const GCP_PROJECT_SETUP_GET_INFO = 'gcp_project_setup_get_info'
 export const GCP_CLOUDRUN_STATIC_HOSTING = 'gcp_cloudrun_static_hosting'
 export const AWS_CLOUDFRONT_STATIC_HOSTING = 'aws_cloudfront_static_hosting'
 export const STATIC_HOSTING = 'static_hosting'

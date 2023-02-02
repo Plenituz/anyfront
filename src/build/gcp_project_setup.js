@@ -280,11 +280,9 @@
     };
   }
   function concatStrArr(token) {
-    const arr = asValArrayConst(token);
-    const parts = arr.map((item) => asTemplateStr(item).Parts || []).flat();
     return {
       Type: "template",
-      Parts: parts
+      Parts: asTemplateStr(token.ArrayConst || []).Parts?.flat() || []
     };
   }
   function asBlock(arr) {
@@ -525,6 +523,7 @@
 
   // anyfront-lib/consts.ts
   var GCP_PROJECT_SETUP = "gcp_project_setup";
+  var GCP_PROJECT_SETUP_GET_INFO = "gcp_project_setup_get_info";
   var BARBE_SLS_VERSION = "v0.1.1";
   var ANYFRONT_VERSION = "v0.1.1";
   var TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute/${BARBE_SLS_VERSION}/.js`;
@@ -606,8 +605,16 @@
       }
       return null;
     };
+    if (!container2["cr_[terraform]"]) {
+      return;
+    }
     return visitTokens(container2["cr_[terraform]"][""][0].Value, visitor);
   }
+
+  // ../../barbe-serverless/src/barbe-sls-lib/consts.ts
+  var TERRAFORM_EXECUTE_GET_OUTPUT = "terraform_execute_get_output";
+  var BARBE_SLS_VERSION2 = "v0.1.1";
+  var TERRAFORM_EXECUTE_URL2 = `https://hub.barbe.app/barbe-serverless/terraform_execute/${BARBE_SLS_VERSION2}/.js`;
 
   // gcp_project_setup.ts
   var container = readDatabagContainer();
@@ -627,9 +634,6 @@
       return [];
     }
     const [block, _] = applyDefaults(container, bag.Value);
-    if (BarbeState.getObjectValue(state, CREATED_TF_STATE_KEY, bag.Name)) {
-      return [];
-    }
     const dir = `gcp_project_setup_${bag.Name}`;
     const bagPreconf = {
       dir,
@@ -691,7 +695,7 @@
       } else {
         localDatabags.push(
           cloudData("google_project", "project", {
-            project: block.project_id
+            project_id: block.project_id
           }),
           cloudOutput("", "project_name", {
             value: asFuncCall("replace", [
@@ -763,22 +767,25 @@
       if (!results.terraform_execute_output[`gcp_setup_${bag.Name}`]) {
         return [];
       }
-      const projectName = asVal(asVal(results.terraform_execute_output[`gcp_setup_${bag.Name}`][0].Value).value);
-      return [
-        BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-          [bag.Name]: prependTfStateFileName(container, `_gcp_project_setup_${bag.Name}`)
-        }),
-        BarbeState.putInObject(CREATED_PROJECT_NAME_KEY, {
-          [bag.Name]: projectName
-        }),
-        {
-          Type: "gcp_project_setup_output",
-          Name: bag.Name,
-          Value: {
-            project_name: projectName
-          }
+      const projectName = asStr(asVal(asVal(results.terraform_execute_output[`gcp_setup_${bag.Name}`][0].Value)[0]).value);
+      let databags2 = [{
+        Type: "gcp_project_setup_output",
+        Name: bag.Name,
+        Value: {
+          project_name: projectName
         }
-      ];
+      }];
+      if (container["cr_[terraform]"]) {
+        databags2.push(
+          BarbeState.putInObject(CREATED_TF_STATE_KEY, {
+            [bag.Name]: prependTfStateFileName(container, `_gcp_project_setup_${bag.Name}`)
+          }),
+          BarbeState.putInObject(CREATED_PROJECT_NAME_KEY, {
+            [bag.Name]: projectName
+          })
+        );
+      }
+      return databags2;
     };
     let databags = [
       ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_TF_STATE_KEY),
@@ -833,6 +840,44 @@
     ];
     exportDatabags(databags);
   }
+  function gcpProjectSetupGetInfoIterator(bag) {
+    return [{
+      Type: TERRAFORM_EXECUTE_GET_OUTPUT,
+      Name: `gcp_setup_get_output_${bag.Name}`,
+      Value: {
+        display_name: `Terraform output - gcp_project_setup.${bag.Name}`,
+        dir: `${outputDir}/gcp_project_setup_${bag.Name}`
+      }
+    }];
+  }
+  function getInfo() {
+    const results = importComponents(container, [{
+      name: `gcp_project_setup_get_info_${barbeLifecycleStep()}`,
+      url: TERRAFORM_EXECUTE_URL,
+      input: iterateBlocks(container, GCP_PROJECT_SETUP_GET_INFO, gcpProjectSetupGetInfoIterator).flat()
+    }]);
+    const resultsIterator = (bag) => {
+      if (!bag.Value) {
+        return [];
+      }
+      if (!results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`] || !results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0] || !results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value || !asVal(results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value)[0]) {
+        return [];
+      }
+      const projectName = asStr(asVal(asVal(results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value)[0]).value);
+      let databags = [{
+        Type: "gcp_project_setup_output",
+        Name: bag.Name,
+        Value: {
+          project_name: projectName
+        }
+      }];
+      return databags;
+    };
+    if (results.terraform_execute_output) {
+      exportDatabags(iterateBlocks(container, GCP_PROJECT_SETUP_GET_INFO, resultsIterator).flat());
+    }
+  }
+  getInfo();
   switch (barbeLifecycleStep()) {
     case "generate":
       exportDatabags(iterateBlocks(container, GCP_PROJECT_SETUP, gcpProjectSetupGenerateIterator).flat());

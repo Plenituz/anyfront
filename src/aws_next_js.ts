@@ -1,9 +1,8 @@
 import { applyDefaults, preConfCloudResourceFactory, compileBlockParam, getAwsCreds } from '../../barbe-serverless/src/barbe-sls-lib/lib';
-import { readDatabagContainer, barbeLifecycleStep, iterateBlocks, appendToTemplate, asBlock, exportDatabags, Databag, SugarCoatedDatabag, asSyntax, asVal, SyntaxToken, barbeCommand, asStr, ImportComponentInput, asTraversal, asTemplate, asFuncCall, importComponents, barbeOutputDir, BarbeState, DatabagContainer, asValArrayConst } from '../../barbe-serverless/src/barbe-std/utils';
+import { readDatabagContainer, barbeLifecycleStep, iterateBlocks, appendToTemplate, asBlock, exportDatabags, Databag, SugarCoatedDatabag, asSyntax, asVal, SyntaxToken, asStr, ImportComponentInput, asTraversal, asTemplate, asFuncCall, importComponents, barbeOutputDir, BarbeState, DatabagContainer, asValArrayConst } from '../../barbe-serverless/src/barbe-std/utils';
 import { AWS_NEXT_JS, AWS_IAM_URL, AWS_LAMBDA_URL, TERRAFORM_EXECUTE_URL, AWS_S3_SYNC_FILES, AWS_S3_SYNC_URL } from './anyfront-lib/consts';
 import { prependTfStateFileName, DBAndImport, emptyExecuteTemplate, emptyExecutePostProcess } from './anyfront-lib/lib';
 import { AWS_IAM_LAMBDA_ROLE, AWS_FUNCTION } from '../../barbe-serverless/src/barbe-sls-lib/consts';
-import md5 from 'md5';
 
 
 const container = readDatabagContainer()
@@ -32,7 +31,7 @@ function preGenerate() {
             Type: 'state_store',
             Name: '',
             Value: {
-                name_prefix: [block.name_prefix ? namePrefix : '', appendToTemplate(namePrefix, [`${bag.Name}-`])],
+                name_prefix: [`${bag.Name}-`],
                 s3: asBlock([{}])
             }
         }
@@ -220,7 +219,7 @@ function generateIterator1(bag: Databag): DBAndImport[] {
                     ],
                     principals: asBlock([{
                         type: "AWS",
-                        identifiers: asTraversal('aws_cloudfront_origin_access_identity.assets_access_id.iam_arn')
+                        identifiers: [asTraversal('aws_cloudfront_origin_access_identity.assets_access_id.iam_arn')]
                     }])
                 },
                 {
@@ -228,7 +227,7 @@ function generateIterator1(bag: Databag): DBAndImport[] {
                     resources: [asTraversal('aws_s3_bucket.assets.arn')],
                     principals: asBlock([{
                         type: "AWS",
-                        identifiers: asTraversal('aws_cloudfront_origin_access_identity.assets_access_id.iam_arn')
+                        identifiers: [asTraversal('aws_cloudfront_origin_access_identity.assets_access_id.iam_arn')]
                     }])
                 }
             ])
@@ -418,7 +417,7 @@ function generateIterator1(bag: Databag): DBAndImport[] {
                         throw new Error('no certificate_domain_to_create, existing_certificate_domain or certificate_arn given with multiple domain names. The easy way to fix this is to provide a certificate_domain_to_create like \'*.domain.com\'')
                     }
                     return {
-                        acm_certificate_arn: asTraversal(`data.aws_acm_certificate.imported_certificate.arn`),
+                        acm_certificate_arn: asTraversal(`aws_acm_certificate_validation.validation.certificate_arn`),
                         ssl_support_method: 'sni-only',
                         minimum_protocol_version: minimumProtocolVersion
                     }
@@ -431,7 +430,7 @@ function generateIterator1(bag: Databag): DBAndImport[] {
             cloudData('aws_route53_zone', 'zone', {
                 name: dotDomain.zone,
             }),
-            ...domainNames.map((domainName, i) => cloudData('aws_route53_record', `cf_distrib_domain_record_${i}`, {
+            ...domainNames.map((domainName, i) => cloudResource('aws_route53_record', `cf_distrib_domain_record_${i}`, {
                 zone_id: asTraversal("data.aws_route53_zone.zone.zone_id"),
                 name: domainName,
                 type: "CNAME",
@@ -476,25 +475,44 @@ function generateIterator1(bag: Databag): DBAndImport[] {
         {
             name: `aws_next_js_aws_lambda_${bag.Name}`,
             url: AWS_LAMBDA_URL,
-            input: [{
-                Type: AWS_FUNCTION,
-                Name: 'origin-request',
-                Value: {
-                    cloudresource_dir: dir,
-                    cloudresource_id: dir,
-                    //these paths are scoped to the directory in which the tf template is executed, hence no ${dir} prefix
-                    package: [{
-                        packaged_file: 'edge.zip',
-                    }],
-                    handler: 'origin_request.handler',
-                    runtime: `nodejs${nodeJsVersion}.x`,
-                    timeout: 3,
-                    name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])],
+            input: [
+                {
+                    Type: AWS_FUNCTION,
+                    Name: 'origin-request',
+                    Value: {
+                        cloudresource_dir: dir,
+                        cloudresource_id: dir,
+                        //these paths are scoped to the directory in which the tf template is executed, hence no ${dir} prefix
+                        package: [{
+                            packaged_file: 'edge.zip',
+                        }],
+                        handler: 'origin_request.handler',
+                        runtime: `nodejs${nodeJsVersion}.x`,
+                        timeout: 3,
+                        name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])],
+                    }
+                },
+                {
+                    Type: "aws_function",
+                    Name: "origin-server",
+                    Value: {
+                        cloudresource_dir: "aws_next_js_" + bag.Name,
+                        cloudresource_id: "aws_next_js_" + bag.Name,
+                        package: [{
+                            packaged_file: "server.zip",
+                        }],
+                        handler: "nextapp/server.handler",
+                        runtime: `nodejs${nodeJsVersion}.x`,
+                        timeout: 10,
+                        memory_size: 1024,
+                        function_url_enabled: true,
+                        name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])],
+                    }
                 }
-            }]
+            ]
         }
     ]
-    if(barbeCommand() !== 'destroy' && !(dotBuild.disabled && asVal(dotBuild.disabled))) {
+    if(!(dotBuild.disabled && asVal(dotBuild.disabled))) {
         databags.push(nextJsBuild())
     }
     if(container['cr_[terraform]']) {
@@ -528,15 +546,18 @@ const applyIterator2 = (terraformExecuteResults: DatabagContainer) => (bag: Data
     if(!bag.Value) {
         return []
     }
-    let databags: SugarCoatedDatabag[] = [
-        BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-            [bag.Name]: prependTfStateFileName(container, `_aws_next_js_${bag.Name}`)
-        })
-    ]
+    let databags: SugarCoatedDatabag[] = []
+    if(container['cr_[terraform]']){
+        databags.push(
+            BarbeState.putInObject(CREATED_TF_STATE_KEY, {
+                [bag.Name]: prependTfStateFileName(container, `_aws_next_js_${bag.Name}`)
+            })
+        )
+    }
     let imports: ImportComponentInput[] = []
     if(terraformExecuteResults.terraform_execute_output?.[`aws_next_js_${bag.Name}`]) {
         const outputs = asValArrayConst(terraformExecuteResults.terraform_execute_output[`aws_next_js_${bag.Name}`][0].Value!)
-        const bucketName = outputs.find(pair => asStr(pair.key) === 'assets_s3_bucket').value
+        const bucketName = asStr(outputs.find(pair => asStr(pair.key) === 'assets_s3_bucket').value)
         imports.push({
             name: `aws_next_js_${bag.Name}`,
             url: AWS_S3_SYNC_URL,

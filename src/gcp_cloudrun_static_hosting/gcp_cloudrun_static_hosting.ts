@@ -1,7 +1,7 @@
 import { applyDefaults, preConfCloudResourceFactory, applyMixins, getGcpToken, DatabagObjVal } from '../../../barbe-serverless/src/barbe-sls-lib/lib';
-import { readDatabagContainer, Databag, barbeLifecycleStep, exportDatabags, iterateBlocks, SugarCoatedDatabag, asTraversal, appendToTemplate, asTemplate, asBlock, ImportComponentInput, importComponents, appendToTraversal, barbeOutputDir, asStr, SyntaxToken, DatabagContainer, applyTransformers, asVal, BarbeState, asValArrayConst } from '../../../barbe-serverless/src/barbe-std/utils';
-import { GCP_CLOUDRUN_STATIC_HOSTING, GCP_PROJECT_SETUP, GCP_PROJECT_SETUP_URL, TERRAFORM_EXECUTE_URL } from '../anyfront-lib/consts';
-import { DBAndImport, emptyExecuteBagNamePrefix, emptyExecutePostProcess, emptyExecuteTemplate, prependTfStateFileName } from '../anyfront-lib/lib';
+import { readDatabagContainer, Databag, barbeLifecycleStep, exportDatabags, iterateBlocks, SugarCoatedDatabag, asTraversal, appendToTemplate, asTemplate, asBlock, ImportComponentInput, importComponents, barbeOutputDir, asStr, SyntaxToken, DatabagContainer, applyTransformers, asVal, BarbeState, asValArrayConst } from '../../../barbe-serverless/src/barbe-std/utils';
+import { GCP_CLOUDRUN_STATIC_HOSTING, GCP_PROJECT_SETUP, GCP_PROJECT_SETUP_GET_INFO, GCP_PROJECT_SETUP_URL, TERRAFORM_EXECUTE_URL } from '../anyfront-lib/consts';
+import { DBAndImport, emptyExecutePostProcess, emptyExecuteTemplate, prependTfStateFileName } from '../anyfront-lib/lib';
 import lister_go from './lister.go';
 import nginx_conf from './nginx.conf';
 import nginx_dockerfile from './Dockerfile.dockerfile';
@@ -83,6 +83,7 @@ function generateIterator(bag: Databag): DBAndImport[] {
                             image: asTemplate([
                                 'gcr.io/',
                                 asTraversal('var.gcp_project'),
+                                '/',
                                 appendToTemplate(namePrefix, [`sh-${bag.Name}`]),
                                 ':latest'
                             ])
@@ -331,19 +332,22 @@ const applyIteratorStep3 = (gcpProjectSetupResults: DatabagContainer, terraformE
         return []
     }
 
-    let databags: SugarCoatedDatabag[] = [
-        BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-            [bag.Name]: prependTfStateFileName(container, `_gcp_cr_static_hosting_${bag.Name}`)
-        })
-    ]
+    let databags: SugarCoatedDatabag[] = []
+    if(container['cr_[terraform]']) {
+        databags.push(
+            BarbeState.putInObject(CREATED_TF_STATE_KEY, {
+                [bag.Name]: prependTfStateFileName(container, `_gcp_cr_static_hosting_${bag.Name}`)
+            })
+        )
+    }
 
     if(!terraformExecuteResults.terraform_execute_output?.[`gcp_cloudrun_static_hosting_apply_${bag.Name}`]) {
         return databags
     }
     const [block, namePrefix] = applyDefaults(container, bag.Value)
     const tfOutput = asValArrayConst(terraformExecuteResults.terraform_execute_output[`gcp_cloudrun_static_hosting_apply_${bag.Name}`][0].Value!)
-    const cloudrunServiceName = asStr(tfOutput.find(pair => asStr(pair.key) === 'cloudrun_service_name'))
-    const urlMapName = asStr(tfOutput.find(pair => asStr(pair.key) === 'load_balancer_url_map'))
+    const cloudrunServiceName = asStr(tfOutput.find(pair => asStr(pair.key) === 'cloudrun_service_name').value)
+    const urlMapName = asStr(tfOutput.find(pair => asStr(pair.key) === 'load_balancer_url_map').value)
     const imageName = asStr(appendToTemplate(namePrefix, ["sh-", bag.Name]))
     const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value!).project_name)
     const gcpToken = getGcpToken()
@@ -391,6 +395,17 @@ function apply() {
     applyTransformers(iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, applyIteratorStep3(gcpProjectSetupResults, terraformExecuteResults)).flat())
 }
 
+function destroyIteratorGetGcpProjectInfo(bag: Databag): SugarCoatedDatabag[] {
+    if(!bag.Value) {
+        return []
+    }
+    return [{
+        Type: GCP_PROJECT_SETUP_GET_INFO,
+        Name: bag.Name,
+        Value: {}
+    }]
+}
+
 function destroyIterator1(bag: Databag): ImportComponentInput[] {
     if(!bag.Value) {
         return []
@@ -402,6 +417,9 @@ function destroyIterator1(bag: Databag): ImportComponentInput[] {
 
 const destroyIterator2 = (gcpProjectSetupResults: DatabagContainer) => (bag: Databag): ImportComponentInput[] => {
     if(!bag.Value) {
+        return []
+    }
+    if(!gcpProjectSetupResults.gcp_project_setup_output || !gcpProjectSetupResults.gcp_project_setup_output[bag.Name]) {
         return []
     }
     const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value!).project_name)
@@ -434,20 +452,29 @@ function destroyIterator3(bag: Databag): SugarCoatedDatabag[] {
 }
 
 function destroy() {
-    let step0Import = iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIterator1).flat()
+    //this contains the gcp_project_setup_output
+    const gcpGetProjectInfoResults = importComponents(container, [{
+        name: 'gcp_cr_static_hosting_get_project_info_destroy',
+        url: GCP_PROJECT_SETUP_URL,
+        input: iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIteratorGetGcpProjectInfo).flat()
+    }])
+    //this is the terraform destroy
+    let step1 = iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIterator2(gcpGetProjectInfoResults)).flat()
     const emptyApplies = makeEmptyExecuteDatabags(container, state)
     if(emptyApplies.length !== 0) {
-        step0Import.push({
-            name: 'gcp_cloudrun_static_hosting_empty_apply_destroy',
+        step1.push({
+            name: 'gcp_cr_static_hosting_empty_apply_destroy',
             url: TERRAFORM_EXECUTE_URL,
             input: emptyApplies,
         })
     }
-
-    const gcpProjectSetupResults = importComponents(container, step0Import)
-
-    exportDatabags(emptyExecutePostProcess(container, gcpProjectSetupResults, GCP_CLOUDRUN_STATIC_HOSTING, CREATED_TF_STATE_KEY))
-    importComponents(container, iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIterator2(gcpProjectSetupResults)).flat())
+    //this runs empty applies + terraform destroy
+    const emptyExecuteResults = importComponents(container, step1)
+    //this is gcp project destroy
+    importComponents(container, iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIterator1).flat())
+    //update state for empty executes
+    exportDatabags(emptyExecutePostProcess(container, emptyExecuteResults, GCP_CLOUDRUN_STATIC_HOSTING, CREATED_TF_STATE_KEY))
+    //clear state of all blocks (because they were just destroyed)
     exportDatabags(iterateBlocks(container, GCP_CLOUDRUN_STATIC_HOSTING, destroyIterator3).flat())
 }
 

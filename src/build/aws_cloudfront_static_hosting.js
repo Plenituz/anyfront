@@ -1143,7 +1143,7 @@ exports.handler = (event, context, callback) => {
                     ENV AWS_ACCESS_KEY_ID="${awsCreds.access_key_id}"
                     ENV AWS_SECRET_ACCESS_KEY="${awsCreds.secret_access_key}"
                     ENV AWS_SESSION_TOKEN="${awsCreds.session_token}"
-                    ENV AWS_REGION="${block.region || os.getenv("AWS_REGION") || "us-east-1"}"
+                    ENV AWS_REGION="${asStr(block.region || os.getenv("AWS_REGION") || "us-east-1")}"
                     ENV AWS_PAGER=""
 
                     RUN aws cloudfront create-invalidation --distribution-id ${cfDistribId} --paths "/*"`

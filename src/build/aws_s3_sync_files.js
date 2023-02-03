@@ -223,7 +223,7 @@
   // anyfront-lib/consts.ts
   var AWS_S3_SYNC_FILES = "aws_s3_sync_files";
   var BARBE_SLS_VERSION = "v0.1.1";
-  var ANYFRONT_VERSION = "v0.1.1";
+  var ANYFRONT_VERSION = "v0.1.2";
   var TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute/${BARBE_SLS_VERSION}/.js`;
   var AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam/${BARBE_SLS_VERSION}/.js`;
   var AWS_LAMBDA_URL = `https://hub.barbe.app/barbe-serverless/aws_function/${BARBE_SLS_VERSION}/.js`;
@@ -277,7 +277,7 @@
     }]);
     const creds = transformed.aws_credentials?.state_store_credentials[0]?.Value;
     if (!creds) {
-      throw new Error("aws_credentials not found");
+      return void 0;
     }
     const credsObj = asVal(creds);
     __awsCredsCached = {
@@ -296,6 +296,9 @@
     }
     const [block, _] = applyDefaults(container, bag.Value);
     const awsCreds = getAwsCreds();
+    if (!awsCreds) {
+      throw new Error("couldn't find AWS credentials");
+    }
     const deleteArg = block.delete && asVal(block.delete) ? " --delete" : "";
     return [{
       Type: "buildkit_run_in_container",

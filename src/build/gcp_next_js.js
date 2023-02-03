@@ -517,7 +517,7 @@
   var GCP_PROJECT_SETUP_GET_INFO = "gcp_project_setup_get_info";
   var GCP_NEXT_JS = "gcp_next_js";
   var BARBE_SLS_VERSION = "v0.1.1";
-  var ANYFRONT_VERSION = "v0.1.1";
+  var ANYFRONT_VERSION = "v0.1.2";
   var TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute/${BARBE_SLS_VERSION}/.js`;
   var AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam/${BARBE_SLS_VERSION}/.js`;
   var AWS_LAMBDA_URL = `https://hub.barbe.app/barbe-serverless/aws_function/${BARBE_SLS_VERSION}/.js`;
@@ -597,7 +597,7 @@
     }]);
     const token = transformed.gcp_token?.state_store_credentials[0]?.Value;
     if (!token) {
-      throw new Error("gcp_token not found");
+      return void 0;
     }
     __gcpTokenCached = asStr(asVal(token).access_token);
     return __gcpTokenCached;

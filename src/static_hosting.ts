@@ -223,7 +223,6 @@ function generate() {
 function relayToSubComponents() {
     const tmp = container.static_hosting_build_dir_map?.['']?.[0]?.Value
     if(!tmp) {
-        console.log('no static_hosting_build_dir_map found, skipping relayToSubComponents')
         return
     }
     let buildOutputDirs = asVal(tmp)

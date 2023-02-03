@@ -590,6 +590,9 @@ const applyIterator3 = (terraformExecuteResults: DatabagContainer) => (bag: Data
     const outputs = asValArrayConst(terraformExecuteResults.terraform_execute_output[`aws_next_js_${bag.Name}`][0].Value!)
     const cfDistribId = asStr(outputs.find(pair => asStr(pair.key) === 'cf_distrib').value)
     const awsCreds = getAwsCreds()
+    if(!awsCreds) {
+        throw new Error('couldn\'t find AWS credentials')
+    }
     return [{
         Type: 'buildkit_run_in_container',
         Name: `aws_cf_static_hosting_invalidate_${bag.Name}`,

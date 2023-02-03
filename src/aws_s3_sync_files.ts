@@ -10,6 +10,9 @@ function awsS3SyncFilesIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] 
     }
     const [block, _] = applyDefaults(container, bag.Value)
     const awsCreds = getAwsCreds();
+    if(!awsCreds) {
+        throw new Error('couldn\'t find AWS credentials')
+    }
     const deleteArg = block.delete && asVal(block.delete) ? ' --delete' : ''
 
     return [{

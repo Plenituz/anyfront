@@ -10,7 +10,7 @@ export const GCP_NEXT_JS = 'gcp_next_js'
 
 
 const BARBE_SLS_VERSION = 'v0.1.1'
-const ANYFRONT_VERSION = 'v0.1.1'
+const ANYFRONT_VERSION = 'v0.1.2'
 
 export const TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute/${BARBE_SLS_VERSION}/.js`
 export const AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam/${BARBE_SLS_VERSION}/.js`

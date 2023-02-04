@@ -31,8 +31,12 @@ function frontendBuildIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] {
             excludes: [
                 '**/node_modules',
                 'node_modules',
+                outputDir,
             ],
-            exported_files_location: 'src/exported_files.json',
+            exported_files: {
+                'exported_files': `frontend_build_${bag.Name}`,
+                'output.json': `frontend_build_${bag.Name}_output.json`
+            },
             read_back: `frontend_build_${bag.Name}_output.json`,
             input_files: {
                 '__barbe_build_script.cjs': buildScript
@@ -43,8 +47,7 @@ function frontendBuildIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] {
                 COPY --from=src . /src
                 WORKDIR /src
 
-                RUN node __barbe_build_script.cjs
-                `
+                RUN node __barbe_build_script.cjs`
         }
     }]
 }

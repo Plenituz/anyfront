@@ -1114,7 +1114,8 @@ exports.handler = (event, context, callback) => {
             display_name: `Uploading files to S3 - ${bag.Name}`,
             bucket_name: bucketName,
             delete: true,
-            blob: block.build_dir
+            dir: asStr(block.build_dir),
+            blob: "."
           }
         }]
       });

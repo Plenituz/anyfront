@@ -934,6 +934,8 @@ CMD sh -c "nginx -g 'daemon off;'"`;
       Type: "buildkit_run_in_container",
       Name: `${bag.Name}_build_gcp_img`,
       Value: {
+        display_name: `Image build - gcp_cloudrun_static_hosting.${bag.Name}`,
+        no_cache: true,
         input_files: {
           "__barbe_nginx.conf": applyMixins(nginx_default, { root_object: rootObject }),
           "__barbe_lister.go": lister_default,
@@ -960,12 +962,7 @@ CMD sh -c "nginx -g 'daemon off;'"`;
                 COPY --from=src __barbe_Dockerfile ./__barbe_tmp/Dockerfile
 
                 RUN --mount=type=ssh,id=docker.sock,target=/var/run/docker.sock docker build -f __barbe_tmp/Dockerfile -t gcr.io/${gcpProjectName}/${imageName} .
-                RUN --mount=type=ssh,id=docker.sock,target=/var/run/docker.sock docker push gcr.io/${gcpProjectName}/${imageName}
-
-                RUN touch tmp`,
-        no_cache: true,
-        exported_files: "tmp",
-        display_name: `Image build - gcp_cloudrun_static_hosting.${bag.Name}`
+                RUN --mount=type=ssh,id=docker.sock,target=/var/run/docker.sock docker push gcr.io/${gcpProjectName}/${imageName}`
       }
     };
     const tfExecute = {

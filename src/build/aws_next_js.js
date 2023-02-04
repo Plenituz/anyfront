@@ -700,7 +700,8 @@
           display_name: `Next.js build - ${bag.Name}`,
           excludes: [
             "node_modules",
-            "**/node_modules"
+            "**/node_modules",
+            outputDir
           ],
           dockerfile: `
                     FROM node:${nodeJsVersion}${nodeJsVersionTag}

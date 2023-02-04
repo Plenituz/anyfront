@@ -102,6 +102,7 @@ function generateIterator1(bag: Databag): DBAndImport[] {
                 excludes: [
                     '**/node_modules',
                     'node_modules',
+                    outputDir
                 ],
                 dockerfile: `
                     # https://github.com/vercel/next.js/blob/canary/examples/with-docker/Dockerfile
@@ -124,7 +125,7 @@ function generateIterator1(bag: Databag): DBAndImport[] {
                     COPY --from=builder /app/.next/standalone ./
                     COPY --from=builder /app/.next/static ./.next/static`,
                 exported_files: {
-                    '.': `${dir}/build`
+                    '/app': `${dir}/build`
                 }
             }
         }
@@ -359,6 +360,8 @@ const applyIteratorStep2 = (gcpProjectSetupResults: DatabagContainer) => (bag: D
         Type: 'buildkit_run_in_container',
         Name: `${bag.Name}_gcp_next_js`,
         Value: {
+            display_name: `Image build - gcp_next_js.${bag.Name}`,
+            no_cache: true,
             input_files: {
                 '__barbe_Dockerfile': applyMixins(deployed_dockerfile, {
                     node_version: nodeJsVersion,
@@ -377,12 +380,7 @@ const applyIteratorStep2 = (gcpProjectSetupResults: DatabagContainer) => (bag: D
                 COPY --from=src __barbe_Dockerfile ./__barbe_tmp/Dockerfile
 
                 RUN --mount=type=ssh,id=docker.sock,target=/var/run/docker.sock docker build -f __barbe_tmp/Dockerfile -t gcr.io/${gcpProjectName}/${imageName} .
-                RUN --mount=type=ssh,id=docker.sock,target=/var/run/docker.sock docker push gcr.io/${gcpProjectName}/${imageName}
-
-                RUN touch tmp`,
-            no_cache: true,
-            exported_files: 'tmp',
-            display_name: `Image build - gcp_next_js.${bag.Name}`,
+                RUN --mount=type=ssh,id=docker.sock,target=/var/run/docker.sock docker push gcr.io/${gcpProjectName}/${imageName}`,
         }
     }
     const tfExecute: ImportComponentInput = {

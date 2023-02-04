@@ -50,17 +50,14 @@ function formatError(err) {
         }
     }
     fs.writeFileSync('output.json', JSON.stringify(output));
-    fs.writeFileSync('exported_files.json', JSON.stringify({
-        [path.join(originalWd, 'output.json')]: 'frontend_build_' + processName + '_output.json',
-    }));
 }
 
-function formatSuccess(obj) {
+function formatSuccess() {
     process.chdir(originalWd);
     const output = {
         frontend_build_output: {
             [processName]: {
-                success: obj
+                success: true
             }
         }
     }
@@ -179,14 +176,10 @@ async function main() {
     }
 
     console.log('Build finished in', buildOutputDir);
-    formatSuccess({
-        build_output_dir: path.join(reactAppDir, buildOutputDir)
-    })
-    console.log('writing', process.cwd() + '/exported_files.json')
-    fs.writeFileSync('exported_files.json', JSON.stringify({
-        [path.join(originalWd, 'output.json')]: 'frontend_build_' + processName + '_output.json',
-        [path.join(originalWd, reactAppDir, buildOutputDir)]: 'frontend_build_' + processName + '/'
-    }));
+    formatSuccess()
+    console.log('moving', path.join(originalWd, reactAppDir, buildOutputDir), 'to', process.cwd() + '/exported_files')
+    fs.renameSync(path.join(originalWd, reactAppDir, buildOutputDir), 'exported_files')
+    console.log('done moving')
 }
 
 main();

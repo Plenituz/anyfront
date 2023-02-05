@@ -63,7 +63,7 @@ Let's add the a `default` block and a `name_prefix`
 
 ```hcl
 template {
-    manifest = "https://hub.barbe.app/anyfront/manifest/v0.1.1/.json"
+    manifest = "https://hub.barbe.app/anyfront/manifest/latest/.json"
 }
 
 default {

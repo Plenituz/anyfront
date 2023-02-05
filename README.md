@@ -27,7 +27,7 @@ sh install-barbe.sh
 2. Create an `infra.hcl` file at the root of your project, this is an example for Next.js on AWS (see [examples](examples/) for other frameworks)
 ```hcl
 template {
-    manifest = "https://hub.barbe.app/anyfront/manifest/v0.1.1/.json"
+    manifest = "https://hub.barbe.app/anyfront/manifest/latest/.json"
 }
 
 aws_next_js "my-site" {

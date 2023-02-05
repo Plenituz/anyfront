@@ -547,14 +547,14 @@
     };
   }
   var __gcpTokenCached = "";
-  function getGcpToken() {
+  function getGcpToken(optional) {
     if (__gcpTokenCached) {
       return __gcpTokenCached;
     }
     const transformed = applyTransformers([{
       Name: "state_store_credentials",
       Type: "gcp_token_request",
-      Value: {}
+      Value: { optional }
     }]);
     const token = transformed.gcp_token?.state_store_credentials[0]?.Value;
     if (!token) {
@@ -910,8 +910,9 @@ CMD sh -c "nginx -g 'daemon off;'"`;
     if (!bag.Value) {
       return [];
     }
+    const [block, namePrefix] = applyDefaults(container, bag.Value);
     return [
-      makeGcpProjectSetupImport(bag, ...applyDefaults(container, bag.Value))
+      makeGcpProjectSetupImport(bag, block, namePrefix)
     ];
   }
   var applyIteratorStep2 = (gcpProjectSetupResults) => (bag) => {
@@ -925,7 +926,7 @@ CMD sh -c "nginx -g 'daemon off;'"`;
     if (!block.build_dir) {
       throw new Error(`build_dir not specified for 'gcp_cloudrun_static_hosting.${bag.Name}'`);
     }
-    const gcpToken = getGcpToken();
+    const gcpToken = getGcpToken(false);
     const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value).project_name);
     const imageName = asStr(appendToTemplate(namePrefix, ["sh-", bag.Name]));
     const buildDir = asStr(block.build_dir);
@@ -1008,7 +1009,7 @@ CMD sh -c "nginx -g 'daemon off;'"`;
     const urlMapName = asStr(tfOutput.find((pair) => asStr(pair.key) === "load_balancer_url_map").value);
     const imageName = asStr(appendToTemplate(namePrefix, ["sh-", bag.Name]));
     const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value).project_name);
-    const gcpToken = getGcpToken();
+    const gcpToken = getGcpToken(false);
     const region = asStr(block.region || "us-central1");
     databags.push({
       Type: "buildkit_run_in_container",
@@ -1061,8 +1062,9 @@ CMD sh -c "nginx -g 'daemon off;'"`;
     if (!bag.Value) {
       return [];
     }
+    const [block, namePrefix] = applyDefaults(container, bag.Value);
     return [
-      makeGcpProjectSetupImport(bag, ...applyDefaults(container, bag.Value))
+      makeGcpProjectSetupImport(bag, block, namePrefix)
     ];
   }
   var destroyIterator2 = (gcpProjectSetupResults) => (bag) => {

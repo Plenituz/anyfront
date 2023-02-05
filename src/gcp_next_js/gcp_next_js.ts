@@ -333,8 +333,9 @@ function applyIteratorStep1(bag: Databag): ImportComponentInput[] {
     if(!bag.Value) {
         return []
     }
+    const [block, namePrefix] = applyDefaults(container, bag.Value)
     return [
-        makeGcpProjectSetupImport(bag, ...applyDefaults(container, bag.Value))
+        makeGcpProjectSetupImport(bag, block, namePrefix)
     ]
 }
 
@@ -348,7 +349,7 @@ const applyIteratorStep2 = (gcpProjectSetupResults: DatabagContainer) => (bag: D
     const [block, namePrefix] = applyDefaults(container, bag.Value)
     
     const dotBuild = compileBlockParam(block, 'build')
-    const gcpToken = getGcpToken()
+    const gcpToken = getGcpToken(false)
     const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value!).project_name)
     const imageName = asStr(appendToTemplate(namePrefix, ["next-", bag.Name]))
     const dir = `${outputDir}/gcp_next_js_${bag.Name}`
@@ -429,7 +430,7 @@ const applyIteratorStep3 = (gcpProjectSetupResults: DatabagContainer, terraformE
     const urlMapName = asStr(tfOutput.find(pair => asStr(pair.key) === 'load_balancer_url_map').value)
     const imageName = asStr(appendToTemplate(namePrefix, ["next-", bag.Name]))
     const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value!).project_name)
-    const gcpToken = getGcpToken()
+    const gcpToken = getGcpToken(false)
     const region = asStr(block.region || 'us-central1')
 
     databags.push({
@@ -491,8 +492,9 @@ function destroyIterator1(bag: Databag): ImportComponentInput[] {
     if(!bag.Value) {
         return []
     }
+    const [block, namePrefix] = applyDefaults(container, bag.Value)
     return [
-        makeGcpProjectSetupImport(bag, ...applyDefaults(container, bag.Value))
+        makeGcpProjectSetupImport(bag, block, namePrefix)
     ]
 }
 

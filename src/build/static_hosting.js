@@ -632,8 +632,8 @@
   var GCP_CLOUDRUN_STATIC_HOSTING = "gcp_cloudrun_static_hosting";
   var AWS_CLOUDFRONT_STATIC_HOSTING = "aws_cloudfront_static_hosting";
   var STATIC_HOSTING = "static_hosting";
-  var BARBE_SLS_VERSION = "v0.1.1";
-  var ANYFRONT_VERSION = "v0.1.2";
+  var BARBE_SLS_VERSION = "v0.2.0";
+  var ANYFRONT_VERSION = "v0.2.0";
   var TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute/${BARBE_SLS_VERSION}/.js`;
   var AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam/${BARBE_SLS_VERSION}/.js`;
   var AWS_LAMBDA_URL = `https://hub.barbe.app/barbe-serverless/aws_function/${BARBE_SLS_VERSION}/.js`;

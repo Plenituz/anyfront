@@ -524,8 +524,8 @@
   // anyfront-lib/consts.ts
   var GCP_PROJECT_SETUP = "gcp_project_setup";
   var GCP_PROJECT_SETUP_GET_INFO = "gcp_project_setup_get_info";
-  var BARBE_SLS_VERSION = "v0.2.0";
-  var ANYFRONT_VERSION = "v0.2.0";
+  var BARBE_SLS_VERSION = "v0.2.1";
+  var ANYFRONT_VERSION = "v0.2.1";
   var TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute/${BARBE_SLS_VERSION}/.js`;
   var AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam/${BARBE_SLS_VERSION}/.js`;
   var AWS_LAMBDA_URL = `https://hub.barbe.app/barbe-serverless/aws_function/${BARBE_SLS_VERSION}/.js`;
@@ -613,7 +613,7 @@
 
   // ../../barbe-serverless/src/barbe-sls-lib/consts.ts
   var TERRAFORM_EXECUTE_GET_OUTPUT = "terraform_execute_get_output";
-  var BARBE_SLS_VERSION2 = "v0.2.0";
+  var BARBE_SLS_VERSION2 = "v0.2.1";
   var TERRAFORM_EXECUTE_URL2 = `https://hub.barbe.app/barbe-serverless/terraform_execute/${BARBE_SLS_VERSION2}/.js`;
 
   // gcp_project_setup.ts

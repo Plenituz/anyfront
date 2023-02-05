@@ -2,18 +2,33 @@
 
 ## What's that Barbe you keep talking about?
 
-[Barbe](https://github.com/Plenituz/barbe) is a platform/engine that make building tools like Anyfront easier. Anyfront is built as collection of templates that are interpreted by Barbe to generate a bunch of Terraform configs, zip files, Docker images, and run a bunch of commands.
+[Barbe](https://github.com/Plenituz/barbe) is a platform/engine that make building tools like Anyfront easier. It's like a CDK but for any vendor. Anyfront is a collection of templates that are interpreted by Barbe to generate a bunch of Terraform configs, zip files, Docker images, and run commands.
 
-Anyfront is one of the first member of a family of cloud infrastructure tools that we're building on top of Barbe.
+So to deploy your website you install Barbe, and use the URL to the Anyfront template (more on that right below).
+
+To install Barbe (more details [here](https://github.com/Plenituz/barbe/blob/main/docs/installation.md)):
+```bash
+# Linux
+curl -fsSL https://hub.barbe.app/install.sh -o install-barbe.sh
+sudo sh install-barbe.sh
+
+# Mac
+curl -fsSL https://hub.barbe.app/install.sh -o install-barbe.sh
+sh install-barbe.sh
+
+# Windows
+Invoke-WebRequest -UseBasicParsing -Uri https://hub.barbe.app/install.ps1 | Invoke-Expression
+```
 
 ## First steps
 
-1. Install [barbe and docker](https://github.com/Plenituz/barbe/blob/main/docs/installation.md)
-2. Create an `infra.hcl` file at the root of your project (for other frameworks details may change, see [examples](examples/))
+Let's deploy a Next.js app to AWS
+
+1. Create an `infra.hcl` file at the root of your project (for other frameworks details may change, see [examples](examples/))
 ```hcl
 template {
     # this tells barbe that we want to use the anyfront template
-    manifest = "https://hub.barbe.app/anyfront/manifest/v0.1.1/.json"
+    manifest = "https://hub.barbe.app/anyfront/manifest/latest/.json"
 }
 
 aws_next_js "my-site" {

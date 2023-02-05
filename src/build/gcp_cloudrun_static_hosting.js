@@ -1051,8 +1051,10 @@ CMD sh -c "nginx -g 'daemon off;'"`;
     }
     return [{
       Type: GCP_PROJECT_SETUP_GET_INFO,
-      Name: bag.Name,
-      Value: {}
+      Name: `gcp_cloudrun_sh_get_info_${bag.Name}`,
+      Value: {
+        name: bag.Name
+      }
     }];
   }
   function destroyIterator1(bag) {
@@ -1067,10 +1069,10 @@ CMD sh -c "nginx -g 'daemon off;'"`;
     if (!bag.Value) {
       return [];
     }
-    if (!gcpProjectSetupResults.gcp_project_setup_output || !gcpProjectSetupResults.gcp_project_setup_output[bag.Name]) {
+    if (!gcpProjectSetupResults.gcp_project_setup_output || !gcpProjectSetupResults.gcp_project_setup_output[`gcp_cloudrun_sh_get_info_${bag.Name}`]) {
       return [];
     }
-    const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value).project_name);
+    const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[`gcp_cloudrun_sh_get_info_${bag.Name}`][0].Value).project_name);
     return [{
       name: `gcp_cloudrun_static_hosting_destroy_${bag.Name}`,
       url: TERRAFORM_EXECUTE_URL,

@@ -255,12 +255,20 @@ function gcpProjectSetupDestroy() {
 }
 
 function gcpProjectSetupGetInfoIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] {
+    if(!bag.Value) {
+        return []
+    }
+    const [block, _] = applyDefaults(container, bag.Value);
+    if(!block.name) {
+        throw new Error(`gcp_project_setup_get_info block ${bag.Name} is missing a 'name' parameter`)
+    }
+    const name = asStr(block.name)
     return [{
         Type: TERRAFORM_EXECUTE_GET_OUTPUT,
         Name: `gcp_setup_get_output_${bag.Name}`,
         Value: {
-            display_name: `Terraform output - gcp_project_setup.${bag.Name}`,
-            dir: `${outputDir}/gcp_project_setup_${bag.Name}`
+            display_name: `Terraform output - gcp_project_setup.${name}`,
+            dir: `${outputDir}/gcp_project_setup_${name}`
         }
     }]
 }

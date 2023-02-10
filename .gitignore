@@ -2,3 +2,4 @@
 .terraform
 .idea
 node_modules
+barbe_dist/

@@ -2,7 +2,7 @@
 
 The only Anyfront-related file in this folder is `infra.hcl`.
 
-This folder shows an example of a static svelte project deployed on GCP using anyfront. (this example project is from [jira_clone](https://github.com/oldboyxx/jira_clone/tree/master/client))
+This folder shows an example of a static react project deployed on GCP using anyfront. (this example project is from [jira_clone](https://github.com/oldboyxx/jira_clone/tree/master/client))
 
 Before you can deploy this example on your GCP account make sure you:
 - Have GCP credentials on the computer running the deployment
@@ -14,7 +14,7 @@ Before you can deploy this example on your GCP account make sure you:
 project_id = "my-project"
 
 # the domain name you want the app to be under
-domain_name = "svelte-spa1.barbe.app"
+domain_name = "react-spa1.barbe.app"
 # the name of the existing DNS zone on your GCP account
 domain_zone_name = "barbe-app"
 # the project id in which the DNS zone above is

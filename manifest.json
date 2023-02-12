@@ -1,10 +1,11 @@
 {
     "manifests": [
-        "https://hub.barbe.app/barbe-serverless/manifest/v0.2.1/.json"
+        "barbe-serverless/manifest.json:v0.2.1"
     ],
     "components": [
-        "https://hub.barbe.app/anyfront/static_hosting/v0.2.1/.js",
-        "https://hub.barbe.app/anyfront/aws_next_js/v0.2.1/.js",
-        "https://hub.barbe.app/anyfront/gcp_next_js/v0.2.1/.js"
+        "anyfront/static_hosting.js:v0.2.1",
+        "anyfront/aws_next_js.js:v0.2.1",
+        "anyfront/gcp_next_js.js:v0.2.1",
+        "anyfront/anyfront.js:v0.2.1"
     ]
 }

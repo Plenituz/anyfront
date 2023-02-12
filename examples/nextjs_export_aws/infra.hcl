@@ -1,9 +1,9 @@
 template {
-  manifest = "../../manifest.json"
+  manifest = "anyfront/manifest.json"
 }
 
 default {
-  name_prefix = ["nextexport1-"]
+  name_prefix = "nextexport1-"
 }
 
 state_store {
@@ -15,14 +15,12 @@ static_hosting "my-site" {
 
     build {
         # since `next build && next export` generates both a `.next` folder an a `out` folder
-        # we help anyfront know that the `out` folder is the one that should be served
+        # we help anyfront know that the `out` folder is the one that should be deployed
         build_output_dir = "out"
     }
 
     domain {
         # the domain name you want the app to be under
-        name = "nextexport1.maplecone.com"
-        # the name of the existing DNS zone on your AWS account
-        zone = "maplecone.com"
+        name = "nextexport1.anyfront.dev"
     }
 }

@@ -1,0 +1,26 @@
+{
+  "plugins": [
+    "tsconfig-paths"
+  ],
+  "presets": [
+    "solid",
+    "@babel/typescript"
+  ],
+  "env": {
+    "development": {
+      "plugins": ["solid-refresh/babel"]
+    },
+    "test": {
+      "presets": [
+        [
+          "@babel/env",
+          {
+            "targets": {
+              "node": true
+            }
+          }
+        ]
+      ]
+    }
+  }
+}

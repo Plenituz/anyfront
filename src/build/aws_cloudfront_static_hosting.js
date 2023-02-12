@@ -191,6 +191,21 @@
         };
     }
   }
+  function isSimpleTemplate(token) {
+    if (!token) {
+      return false;
+    }
+    if (typeof token === "string" || token.Type === "literal_value") {
+      return true;
+    }
+    if (token.Type !== "template") {
+      return false;
+    }
+    if (!token.Parts) {
+      return true;
+    }
+    return token.Parts.every(isSimpleTemplate);
+  }
   function asVal(token) {
     switch (token.Type) {
       case "template":
@@ -253,35 +268,6 @@
     return {
       Type: "template",
       Parts: arr.map(asSyntax)
-    };
-  }
-  function asTemplateStr(arr) {
-    if (!Array.isArray(arr)) {
-      arr = [arr];
-    }
-    return {
-      Type: "template",
-      Parts: arr.map((item) => {
-        if (typeof item === "string") {
-          return {
-            Type: "literal_value",
-            Value: item
-          };
-        }
-        if (item.Type === "scope_traversal" || item.Type === "relative_traversal" || item.Type === "literal_value" || item.Type === "template") {
-          return item;
-        }
-        return {
-          Type: "literal_value",
-          Value: asStr(item)
-        };
-      })
-    };
-  }
-  function concatStrArr(token) {
-    return {
-      Type: "template",
-      Parts: asTemplateStr(token.ArrayConst || []).Parts?.flat() || []
     };
   }
   function appendToTemplate(source, toAdd) {
@@ -442,12 +428,15 @@
           importComponentInput.input[type][name].push(databag);
         }
       }
-      const id = `${component.name}_${component.url}`;
+      const id = `${component.name || ""}_${component.url}`;
       barbeImportComponent.push({
         Type: "barbe_import_component",
         Name: id,
         Value: importComponentInput
       });
+    }
+    if (barbeImportComponent.length === 0) {
+      return {};
     }
     const resp = barbeRpcCall({
       method: "importComponents",
@@ -520,11 +509,50 @@
     const blockVal = asVal(mergeTokens([defaults, block]));
     return [
       blockVal,
-      compileNamePrefix(blockVal)
+      compileNamePrefix(container2, block)
     ];
   }
-  function compileNamePrefix(blockVal) {
-    return concatStrArr(blockVal.name_prefix || asSyntax([]));
+  function compileNamePrefix(container2, block) {
+    let namePrefixes = [];
+    if (container2.global_default) {
+      const globalDefaults = Object.values(container2.global_default).flatMap((group) => group.map((block2) => block2.Value)).filter((block2) => block2).flatMap((block2) => block2.ObjectConst?.filter((pair) => pair.Key === "name_prefix")).filter((block2) => block2).map((block2) => block2.Value);
+      namePrefixes.push(...globalDefaults);
+    }
+    let defaultName;
+    const copyFrom = block.ObjectConst?.find((pair) => pair.Key === "copy_from");
+    if (copyFrom) {
+      defaultName = asStr(copyFrom.Value);
+    } else {
+      defaultName = "";
+    }
+    if (container2.default && container2.default[defaultName]) {
+      const defaults = container2.default[defaultName].map((bag) => bag.Value).filter((block2) => block2).flatMap((block2) => block2.ObjectConst?.filter((pair) => pair.Key === "name_prefix")).filter((block2) => block2).map((block2) => block2.Value);
+      namePrefixes.push(...defaults);
+    }
+    namePrefixes.push(...block.ObjectConst?.filter((pair) => pair.Key === "name_prefix").map((pair) => pair.Value) || []);
+    let output = {
+      Type: "template",
+      Parts: []
+    };
+    const mergeIn = (namePrefixToken) => {
+      switch (namePrefixToken.Type) {
+        case "literal_value":
+          output.Parts.push(namePrefixToken);
+          break;
+        case "template":
+          output.Parts.push(...namePrefixToken.Parts || []);
+          break;
+        case "array_const":
+          namePrefixToken.ArrayConst?.forEach(mergeIn);
+          break;
+        default:
+          console.log("unknown name_prefix type '", namePrefixToken.Type, "'");
+      }
+    };
+    for (const namePrefixToken of namePrefixes) {
+      mergeIn(namePrefixToken);
+    }
+    return output;
   }
   function preConfCloudResourceFactory(blockVal, kind, preconf, bagPreconf) {
     const cloudResourceId = blockVal.cloudresource_id ? asStr(blockVal.cloudresource_id) : void 0;
@@ -720,26 +748,42 @@ exports.handler = (event, context, callback) => {
     }
     return visitTokens(container2["cr_[terraform]"][""][0].Value, visitor);
   }
+  function guessAwsDnsZoneBasedOnDomainName(domainName) {
+    if (!isSimpleTemplate(domainName)) {
+      return null;
+    }
+    const parts = asStr(domainName).split(".");
+    if (parts.length === 2) {
+      return `${parts[0]}.${parts[1]}`;
+    }
+    if (parts.length < 3) {
+      return null;
+    }
+    return `${parts[parts.length - 2]}.${parts[parts.length - 1]}`;
+  }
 
   // anyfront-lib/consts.ts
   var AWS_S3_SYNC_FILES = "aws_s3_sync_files";
   var AWS_CLOUDFRONT_STATIC_HOSTING = "aws_cloudfront_static_hosting";
   var BARBE_SLS_VERSION = "v0.2.1";
   var ANYFRONT_VERSION = "v0.2.1";
-  var TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute/${BARBE_SLS_VERSION}/.js`;
-  var AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam/${BARBE_SLS_VERSION}/.js`;
-  var AWS_LAMBDA_URL = `https://hub.barbe.app/barbe-serverless/aws_function/${BARBE_SLS_VERSION}/.js`;
-  var GCP_PROJECT_SETUP_URL = `https://hub.barbe.app/anyfront/gcp_project_setup/${ANYFRONT_VERSION}/.js`;
-  var AWS_S3_SYNC_URL = `https://hub.barbe.app/anyfront/aws_s3_sync_files/${ANYFRONT_VERSION}/.js`;
-  var FRONTEND_BUILD_URL = `https://hub.barbe.app/anyfront/frontend_build/${ANYFRONT_VERSION}/.js`;
-  var GCP_CLOUDRUN_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/gcp_cloudrun_static_hosting/${ANYFRONT_VERSION}/.js`;
-  var AWS_CLOUDFRONT_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/aws_cloudfront_static_hosting/${ANYFRONT_VERSION}/.js`;
+  var TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute.js:${BARBE_SLS_VERSION}`;
+  var AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam.js:${BARBE_SLS_VERSION}`;
+  var AWS_LAMBDA_URL = `https://hub.barbe.app/barbe-serverless/aws_function.js:${BARBE_SLS_VERSION}`;
+  var GCP_PROJECT_SETUP_URL = `https://hub.barbe.app/anyfront/gcp_project_setup.js:${ANYFRONT_VERSION}`;
+  var AWS_S3_SYNC_URL = `https://hub.barbe.app/anyfront/aws_s3_sync_files.js:${ANYFRONT_VERSION}`;
+  var FRONTEND_BUILD_URL = `https://hub.barbe.app/anyfront/frontend_build.js:${ANYFRONT_VERSION}`;
+  var GCP_CLOUDRUN_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/gcp_cloudrun_static_hosting.js:${ANYFRONT_VERSION}`;
+  var AWS_NEXT_JS_URL = `https://hub.barbe.app/anyfront/aws_next_js.js:${ANYFRONT_VERSION}`;
+  var GCP_NEXT_JS_URL = `https://hub.barbe.app/anyfront/gcp_next_js.js:${ANYFRONT_VERSION}`;
+  var AWS_CLOUDFRONT_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/aws_cloudfront_static_hosting.js:${ANYFRONT_VERSION}`;
+  var STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/static_hosting.js:${ANYFRONT_VERSION}`;
 
   // ../../barbe-serverless/src/barbe-sls-lib/consts.ts
   var AWS_FUNCTION = "aws_function";
   var AWS_IAM_LAMBDA_ROLE = "aws_iam_lambda_role";
   var BARBE_SLS_VERSION2 = "v0.2.1";
-  var TERRAFORM_EXECUTE_URL2 = `https://hub.barbe.app/barbe-serverless/terraform_execute/${BARBE_SLS_VERSION2}/.js`;
+  var TERRAFORM_EXECUTE_URL2 = `https://hub.barbe.app/barbe-serverless/terraform_execute.js:${BARBE_SLS_VERSION2}`;
 
   // aws_cloudfront_static_hosting/aws_cloudfront_static_hosting.ts
   var container = readDatabagContainer();
@@ -964,7 +1008,9 @@ exports.handler = (event, context, callback) => {
       if (domainNames.length > 0) {
         localDatabags.push(
           cloudData("aws_route53_zone", "zone", {
-            name: block.zone
+            name: block.zone || guessAwsDnsZoneBasedOnDomainName(domainNames[0]) || (() => {
+              throw new Error("no 'zone' given and could not guess based on domain name");
+            })()
           }),
           ...domainNames.map((domainName, i) => cloudResource("aws_route53_record", `cf_distrib_domain_record_${i}`, {
             zone_id: asTraversal("data.aws_route53_zone.zone.zone_id"),

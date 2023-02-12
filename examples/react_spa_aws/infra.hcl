@@ -1,5 +1,5 @@
 template {
-  manifest = "../../manifest.json"
+  manifest = "anyfront/manifest.json"
 }
 
 static_hosting "my-react-spa-site" {
@@ -13,8 +13,6 @@ static_hosting "my-react-spa-site" {
 
     domain {
         # the domain name you want the app to be under
-        name = "react-spa1.maplecone.com"
-        # the name of the existing DNS zone on your AWS account
-        zone = "maplecone.com"
+        name = "react-spa1.anyfront.dev"
     }
 }

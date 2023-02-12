@@ -10,9 +10,7 @@ Before you can deploy this example on your AWS account make sure you:
 ```hcl
 domain {
     # the domain name you want the app to be under
-    name = "svelte-spa1.maplecone.com"
-    # the name of the existing DNS zone on your AWS account
-    zone = "maplecone.com"
+    name = "svelte-spa1.anyfront.dev"
 }
 ```
 

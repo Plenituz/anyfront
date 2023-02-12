@@ -1,5 +1,5 @@
 template {
-    manifest = "../../manifest.json"
+    manifest = "anyfront/manifest.json"
 }
 
 default {
@@ -15,7 +15,7 @@ default {
     # the project id in which the DNS zone above is
     domain_project_id = "barbe-website"
 
-    name_prefix = ["nextexport1-"]
+    name_prefix = "nextexport1-"
 }
 
 state_store {

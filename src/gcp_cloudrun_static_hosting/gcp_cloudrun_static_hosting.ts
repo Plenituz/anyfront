@@ -32,7 +32,7 @@ function makeGcpProjectSetupImport(bag: Databag, block: DatabagObjVal, namePrefi
             Name: bag.Name,
             Value: {
                 project_id: block.project_id,
-                project_name: appendToTemplate(namePrefix, [bag.Name]),
+                project_name: block.project_name || namePrefix,
                 organization_id: block.organization_id,
                 billing_account_id: block.billing_account_id,
                 billing_account_name: block.billing_account_name,

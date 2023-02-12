@@ -1,0 +1,7 @@
+.docusaurus
+.cache-loader
+build
+backers.json
+node_modules
+yarn.lock
+i18n/*

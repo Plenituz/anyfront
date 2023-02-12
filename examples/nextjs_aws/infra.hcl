@@ -1,9 +1,9 @@
 template {
-  manifest = "../../manifest.json"
+  manifest = "anyfront/manifest.json"
 }
 
 default {
-    name_prefix = ["my-company-${env.STAGE}-"]
+    name_prefix = "my-company-${env.STAGE}-"
 }
 
 aws_next_js "my-site" {

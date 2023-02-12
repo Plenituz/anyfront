@@ -1,7 +1,7 @@
 import { applyDefaults, preConfCloudResourceFactory, compileBlockParam, getAwsCreds } from '../../barbe-serverless/src/barbe-sls-lib/lib';
 import { readDatabagContainer, barbeLifecycleStep, iterateBlocks, appendToTemplate, asBlock, exportDatabags, Databag, SugarCoatedDatabag, asSyntax, asVal, SyntaxToken, asStr, ImportComponentInput, asTraversal, asTemplate, asFuncCall, importComponents, barbeOutputDir, BarbeState, DatabagContainer, asValArrayConst } from '../../barbe-serverless/src/barbe-std/utils';
 import { AWS_NEXT_JS, AWS_IAM_URL, AWS_LAMBDA_URL, TERRAFORM_EXECUTE_URL, AWS_S3_SYNC_FILES, AWS_S3_SYNC_URL } from './anyfront-lib/consts';
-import { prependTfStateFileName, DBAndImport, emptyExecuteTemplate, emptyExecutePostProcess } from './anyfront-lib/lib';
+import { prependTfStateFileName, DBAndImport, emptyExecuteTemplate, emptyExecutePostProcess, guessAwsDnsZoneBasedOnDomainName } from './anyfront-lib/lib';
 import { AWS_IAM_LAMBDA_ROLE, AWS_FUNCTION } from '../../barbe-serverless/src/barbe-sls-lib/consts';
 
 
@@ -429,7 +429,7 @@ function generateIterator1(bag: Databag): DBAndImport[] {
     if(domainNames.length > 0) {
         databags.push(
             cloudData('aws_route53_zone', 'zone', {
-                name: dotDomain.zone,
+                name: dotDomain.zone || guessAwsDnsZoneBasedOnDomainName(domainNames[0]) || (() => {throw new Error('no \'zone\' given and could not guess based on domain name')})(),
             }),
             ...domainNames.map((domainName, i) => cloudResource('aws_route53_record', `cf_distrib_domain_record_${i}`, {
                 zone_id: asTraversal("data.aws_route53_zone.zone.zone_id"),

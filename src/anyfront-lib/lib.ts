@@ -1,4 +1,4 @@
-import { BarbeState, Databag, DatabagContainer, ImportComponentInput, SugarCoatedDatabag, SyntaxToken, visitTokens } from '../../../barbe-serverless/src/barbe-std/utils';
+import { asStr, BarbeState, Databag, DatabagContainer, ImportComponentInput, isSimpleTemplate, SugarCoatedDatabag, SyntaxToken, visitTokens } from '../../../barbe-serverless/src/barbe-std/utils';
 
 export type DBAndImport = {
     databags: (Databag | SugarCoatedDatabag)[]
@@ -85,4 +85,18 @@ export function prependTfStateFileName(container: DatabagContainer, prefix: stri
         return 
     }
     return visitTokens(container['cr_[terraform]'][''][0].Value!, visitor)
+}
+
+export function guessAwsDnsZoneBasedOnDomainName(domainName: SyntaxToken | string): string | null {
+    if(!isSimpleTemplate(domainName)) {
+        return null
+    }
+    const parts = asStr(domainName).split('.')
+    if(parts.length === 2) {
+        return `${parts[0]}.${parts[1]}`
+    }
+    if (parts.length < 3) {
+        return null
+    }
+    return `${parts[parts.length - 2]}.${parts[parts.length - 1]}`
 }

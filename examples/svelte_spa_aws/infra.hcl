@@ -1,9 +1,9 @@
 template {
-  manifest = "../../manifest.json"
+  manifest = "anyfront/manifest.json"
 }
 
 default {
-  name_prefix = ["svelte-spa1-"]
+  name_prefix = "svelte-spa1-"
 }
 
 state_store {
@@ -15,8 +15,6 @@ static_hosting "my-site" {
 
     domain {
         # the domain name you want the app to be under
-        name = "svelte-spa1.maplecone.com"
-        # the name of the existing DNS zone on your AWS account
-        zone = "maplecone.com"
+        name = "svelte-spa1.anyfront.dev"
     }
 }

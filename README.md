@@ -1,4 +1,4 @@
-# Anyfront: Deploy any front-end web application on any cloud platform with minimal configuration
+# Anyfront: Deploy any front-end web application on any cloud platform in 1 click
 
 **Anyfront orchestrates tools like terraform, docker and other CLIs to simplify deploying web applications on cloud platforms.**
 
@@ -12,10 +12,10 @@ Anyfront will:
 All that in one command, without you needing to know anything about AWS, GCP or Terraform. You don't even need to have their CLI installed.
 
 Anyfront makes it really easy to deploy your website but also:
-- Is always up-to-date, the infrastructure templates will evolve overtime to keep up with the latest best practices, you don't have to touch anything to get the latest improvements
+- Is always up-to-date, the infrastructure templates will evolve overtime to keep up with the latest best practices, you don't have to touch anything to get the latest improvements and cost savings from AWS/GCP
 - Is portable, the deployments can run on any machine with a container runtime, no dependencies to install
 
-Interested? Need some help? Reach out on [Discord](https://discord.gg/6Cwa6A8nF8)!
+Interested? Need some help? Reach out on [Discord](https://hub.barbe.app/discord)!
 
 ## 2 minutes getting started
 
@@ -24,34 +24,41 @@ Interested? Need some help? Reach out on [Discord](https://discord.gg/6Cwa6A8nF8
 curl -fsSL https://hub.barbe.app/install.sh -o install-barbe.sh
 sh install-barbe.sh
 ```
-2. Create an `infra.hcl` file at the root of your project, this is an example for Next.js on AWS (see [examples](examples/) for other frameworks)
-```hcl
-template {
-    manifest = "https://hub.barbe.app/anyfront/manifest/latest/.json"
-}
-
-aws_next_js "my-site" {
-    domain {
-        # the domain name you want the app to be under
-        name = "nextapp1.anyfront.dev"
-        # the name of the existing DNS zone on your AWS account
-        zone = "anyfront.dev"
-    }
-}
-```
-3. Run the deployment
+2. If your project works when doing `npm install` and `npm run build`, you can deploy it without any configuration:
 ```bash
-# sudo may be required depending on your docker setup
-sudo barbe apply infra.hcl
+# deploying on AWS from a git repository
+barbe apply anyfront/git-aws.hcl \
+    --env DOMAIN=my-domain.example.com \
+    --env GIT_URL=https://github.com/owner/repo
+
+# deploying on GCP from a git repository
+barbe apply anyfront/git-gcp.hcl \
+    --env DOMAIN=my-domain.example.com \
+    --env GIT_URL=https://github.com/owner/repo \
+    --env ZONE=example-com \
+    --env ZONE_PROJECT=dns-project
+
+# deploying on AWS from a local directory
+cd /path/to/project
+barbe apply anyfront/aws.hcl --env DOMAIN=my-domain.example.com
+
+# deploying on GCP from a local directory
+cd /path/to/project
+barbe apply anyfront/gcp.hcl \
+    --env DOMAIN=my-domain.example.com \
+    --env ZONE=example-com \
+    --env ZONE_PROJECT=dns-project
 ```
-4. Barbe/anyfront will do the rest, the first deployment usually takes a little longer, grab a drink!
-5. Want more details? Click [here](docs/getting-started.md)
+3. Sit back, the first deployment usually takes a little longer, grab a drink!
+4. For some projects, you may want to configure more things, like the Node.js version, adding extra build steps (`node getSecrets.js` or whatever). To learn more head to the [Getting Started](docs/getting-started.md)
 
 ## At a glance
 
+You can deploy with our pre-configured templates as shown above or configure your own deployment.
+
 Here are some configuration snippets showing how easy it is to configure the deployment of various projects. See [Getting Started](docs/getting-started.md) for more details
 
-Deploying Next.js on GCP
+Deploying Next.js on GCP or AWS (this could be done with the pre-configured templates)
 ```hcl
 gcp_next_js "my-next-app-gcp" {
     domain {
@@ -63,10 +70,6 @@ gcp_next_js "my-next-app-gcp" {
         zone_project = "dns-project"
     }
 }
-```
-
-Deploying Next.js on AWS
-```hcl
 aws_next_js "my-next-app-aws" {
     domain {
         # the domain name you want the app to be under
@@ -77,57 +80,48 @@ aws_next_js "my-next-app-aws" {
 }
 ```
 
-Deploying a single page app or static website on GCP
+Running a script before the build
 ```hcl
 static_hosting "my-react-app-gcp" {
     platform = "gcp"
 
-    domain {
-        # the domain name you want the app to be under
-        name = "react-spa.example.com"
-        # the name of the existing DNS zone on your GCP account
-        zone = "example-com"
-        # the project id in which the DNS zone above is
-        zone_project = "dns-project"
+    build {
+        build_cmd = "node getSecrets.js && npm run build"
     }
 }
 ```
 
-Deploying a single page app or static website on AWS
+Change the version of Node.js being used to build you app
 ```hcl
-static_hosting "my-react-app-aws" {
-    platform = "aws"
+static_hosting "my-react-app-gcp" {
+    platform = "gcp"
 
-    domain {
-        # the domain name you want the app to be under
-        name = "react-spa.example.com"
-        # the name of the existing DNS zone on your AWS account
-        zone = "example.com"
+    build {
+        nodejs_version = "14"
     }
 }
 ```
 
 ### Currently supported platforms and frameworks
 
-|            | AWS | GCP |
-|------------|-----|-----|
-| React SPA  | [✓](examples/react_spa_aws/)   | [✓](examples/react_spa_gcp/)   |
-| Next.js    | [✓](examples/nextjs_aws/)   | [✓](examples/nextjs_gcp/)   |
-| Svelte SPA | [✓](examples/svelte_spa_aws/)   | [✓](examples/svelte_spa_gcp/)   |
-| Vue SPA    | ✓*  | ✓*  |
+|             | AWS | GCP |
+|-------------|-----|-----|
+| Any static website | ✓ | ✓ |
+| React SPA   | [✓](examples/react_spa_aws/)   | [✓](examples/react_spa_gcp/)   |
+| Docusaurus  | [✓](examples/docusaurus_aws/)   | [✓](examples/docusaurus_gcp/)   |
+| Next.js     | [✓](examples/nextjs_aws/)   | [✓](examples/nextjs_gcp/)   |
+| Svelte SPA  | [✓](examples/svelte_spa_aws/)   | [✓](examples/svelte_spa_gcp/)   |
+| Vue SPA     | [✓](examples/vue_aws/)  | [✓](examples/vue_gcp/)  |
+| SolidJS SPA | [✓](examples/solidjs_aws/)  | [✓](examples/solidjs_gcp/)  |
+| Any containerized website | 🔜 | 🔜 |
+| SolidStart  | 🔜 | 🔜 |
+| SvelteKit   | 🔜 | 🔜 |
+| Astro       | 🔜 | 🔜 |
 
-> Items marked with `*` don't have example projects yet. Find all the examples under [`examples`](examples/)
-
-> We'll add more examples, platforms (Azure) and frameworks (Solid, SvelteKit, ...) as we go. Feel free to create/upvote an issue for your favorite framework/platform so we can prioritize it. 
-
+> We'll add more examples, platforms and frameworks as we go. Feel free to create/upvote an issue for your favorite framework/platform so we can prioritize it.
 
 ### Interested?
 
 Checkout the [detailed getting started](docs/getting-started.md), [docs](docs/README.md) and the [examples](examples/).
 
-Reach out on [Discord](https://discord.gg/6Cwa6A8nF8)!
-
-You can also learn more about what you can do with Barbe in general:
- - [Barbe-serverless getting started](https://github.com/Plenituz/barbe-serverless/blob/main/docs/getting-started.md)
- - [`default` blocks](https://github.com/Plenituz/barbe-serverless/blob/main/docs/default-blocks.md)
- - [Integrating existing projects](https://github.com/Plenituz/barbe-serverless/blob/main/docs/integrating-existing-projects.md)
+Need help? Reach out on [Discord](https://hub.barbe.app/discord)!

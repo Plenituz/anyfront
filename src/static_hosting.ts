@@ -3,7 +3,6 @@ import { applyDefaults, DatabagObjVal, compileBlockParam } from '../../barbe-ser
 import { STATIC_HOSTING, FRONTEND_BUILD_URL, GCP_CLOUDRUN_STATIC_HOSTING, AWS_CLOUDFRONT_STATIC_HOSTING, GCP_CLOUDRUN_STATIC_HOSTING_URL, AWS_CLOUDFRONT_STATIC_HOSTING_URL } from './anyfront-lib/consts';
 import md5 from 'md5';
 
-
 const container = readDatabagContainer()
 
 type BlockIterator<T> = (bag: Databag, block: DatabagObjVal, namePrefix: SyntaxToken) => T
@@ -42,6 +41,7 @@ function makeSubDatabags(container: DatabagContainer, buildOutputDirs: {[hash: s
                 root_object: block.root_object,
                 region: block.region || 'us-central1',
                 project_id: dotGcpProject.project_id || block.google_cloud_project_id,
+                project_name: dotGcpProject.project_name || bag.Name,
                 organization_id: dotGcpProject.organization_id,
                 organization_domain: dotGcpProject.organization_domain,
                 billing_account_name: dotGcpProject.billing_account_name,
@@ -87,7 +87,7 @@ function makeSubImports(container: DatabagContainer, buildOutputDirs: {[hash: st
         imports.push({
             name: `static_hosting_gcp_${barbeLifecycleStep()}`,
             url: GCP_CLOUDRUN_STATIC_HOSTING_URL,
-            copyFromContainer: ["default", "cr_[terraform]"],
+            copyFromContainer: ["default", "global_default", "cr_[terraform]"],
             input: gcpStaticHostings
         })
     }
@@ -95,7 +95,7 @@ function makeSubImports(container: DatabagContainer, buildOutputDirs: {[hash: st
         imports.push({
             name: `static_hosting_aws_${barbeLifecycleStep()}`,
             url: AWS_CLOUDFRONT_STATIC_HOSTING_URL,
-            copyFromContainer: ["default", "cr_[terraform]"],
+            copyFromContainer: ["default", "global_default", "cr_[terraform]"],
             input: awsStaticHostings
         })
     }
@@ -151,7 +151,7 @@ function preGenerate() {
 }
 
 function computeBagBuildHash(bag: Databag): string {
-    const [block, namePrefix] = applyDefaults(container, bag.Value!)
+    const [block, _] = applyDefaults(container, bag.Value!)
     const dotBuild = compileBlockParam(block, 'build')
     const dotEnvironment = compileBlockParam(block, 'environment')
     return md5(`
@@ -239,6 +239,7 @@ switch(barbeLifecycleStep()) {
         preGenerate()
         break
     case 'generate':
+    case 'post_generate':
         generate()
         break
     case 'apply':

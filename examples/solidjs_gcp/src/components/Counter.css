@@ -1,0 +1,6 @@
+.button {
+  min-height: 5vh;
+  border-radius: 1rem;
+  font-size: calc(10px + 2vmin);
+  padding: 0.5rem;
+}

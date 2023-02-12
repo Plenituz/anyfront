@@ -14,7 +14,17 @@ const givenCmdEnv = {
 const ignoredDirs = {
     '.svelte-kit': true,
     'node_modules': true,
+    '.docusaurus': true,
 }
+const packageJsonIncludeList = [
+    'react',
+    'svelte',
+    'solid-js',
+    '"vue"',
+    'preact',
+    '"lit"',
+    '@angular',
+]
 
 function find(dir, fileName) {
     const files = fs.readdirSync(dir);
@@ -49,6 +59,7 @@ function formatError(err) {
             }
         }
     }
+    fs.mkdirSync(path.join(process.cwd(), 'exported_files'), {recursive: true});
     fs.writeFileSync('output.json', JSON.stringify(output));
 }
 
@@ -83,7 +94,7 @@ async function wait(t) {
 async function main() {
     let reactAppDir = givenBuildDir;
     if(!reactAppDir) {
-        const foundReacts = filter(find('.', 'package.json'), ['react', 'svelte']);
+        const foundReacts = filter(find('.', 'package.json'), packageJsonIncludeList);
         if (foundReacts.length === 0) {
             formatError('no_package_json_found')
             return
@@ -95,7 +106,7 @@ async function main() {
         reactAppDir = path.dirname(foundReacts[0]);
     }
 
-    console.log('React app directory: ' + reactAppDir);
+    console.log('app directory: ' + reactAppDir);
     process.chdir(reactAppDir);
 
     const usingYarn = fs.existsSync('yarn.lock')
@@ -106,7 +117,6 @@ async function main() {
     } else {
         execSyncWrapper('npm install');
     }
-
 
     let dirsPreBuild = fs.readdirSync('.').filter(f => fs.statSync(f).isDirectory())
     let changedFiles = {}
@@ -178,7 +188,16 @@ async function main() {
     console.log('Build finished in', buildOutputDir);
     formatSuccess()
     console.log('moving', path.join(originalWd, reactAppDir, buildOutputDir), 'to', process.cwd() + '/exported_files')
-    fs.renameSync(path.join(originalWd, reactAppDir, buildOutputDir), 'exported_files')
+    const fullPathBuildOutputDir = path.join(originalWd, reactAppDir, buildOutputDir)
+    try {
+        fs.renameSync(fullPathBuildOutputDir, 'exported_files')
+    }catch (err){
+        if (err.code !== 'EXDEV') {
+            throw err;
+        }
+        console.log('failed to rename, moving with mv')
+        execSyncWrapper(`mv ${fullPathBuildOutputDir} exported_files`)
+    }
     console.log('done moving')
 }
 

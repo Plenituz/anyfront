@@ -1,6 +1,6 @@
 {
     "manifests": [
-        "barbe-serverless/manifest.json:v0.2.1"
+        "barbe-serverless/manifest.json:v0.2.2"
     ],
     "components": [
         "anyfront/static_hosting.js:v0.2.2",

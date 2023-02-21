@@ -11,8 +11,8 @@ export const AWS_SVELTEKIT = 'aws_sveltekit'
 export const ANYFRONT = 'anyfront'
 
 
-const BARBE_SLS_VERSION = 'v0.2.1'
-const ANYFRONT_VERSION = 'v0.2.1'
+const BARBE_SLS_VERSION = 'v0.2.2'
+const ANYFRONT_VERSION = 'v0.2.2'
 
 export const TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute.js:${BARBE_SLS_VERSION}`
 export const AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam.js:${BARBE_SLS_VERSION}`

@@ -1,5 +1,8 @@
 (() => {
   // ../../barbe-serverless/src/barbe-std/rpc.ts
+  function isSuccess(resp) {
+    return resp.result !== void 0;
+  }
   function isFailure(resp) {
     return resp.error !== void 0;
   }
@@ -187,6 +190,26 @@
     }
     return resp.result;
   }
+  function statFile(fileName) {
+    return barbeRpcCall({
+      method: "statFile",
+      params: [fileName]
+    });
+  }
+  function dirname(path) {
+    const parts = path.split("/");
+    if (parts.length === 1) {
+      return ".";
+    } else if (parts.length === 2 && parts[0] === "") {
+      return "/";
+    } else {
+      parts.pop();
+      return parts.join("/");
+    }
+  }
+  function throwStatement(message) {
+    throw new Error(message);
+  }
   function readDatabagContainer() {
     return JSON.parse(os.file.readFile("__barbe_input.json"));
   }
@@ -238,18 +261,20 @@
       const globalDefaults = Object.values(container2.global_default).flatMap((group) => group.map((block2) => block2.Value)).filter((block2) => block2).flatMap((block2) => block2.ObjectConst?.filter((pair) => pair.Key === "name_prefix")).filter((block2) => block2).map((block2) => block2.Value);
       namePrefixes.push(...globalDefaults);
     }
-    let defaultName;
-    const copyFrom = block.ObjectConst?.find((pair) => pair.Key === "copy_from");
-    if (copyFrom) {
-      defaultName = asStr(copyFrom.Value);
-    } else {
-      defaultName = "";
+    let defaultName = "";
+    if (block) {
+      const copyFrom = block.ObjectConst?.find((pair) => pair.Key === "copy_from");
+      if (copyFrom) {
+        defaultName = asStr(copyFrom.Value);
+      }
     }
     if (container2.default && container2.default[defaultName]) {
       const defaults = container2.default[defaultName].map((bag) => bag.Value).filter((block2) => block2).flatMap((block2) => block2.ObjectConst?.filter((pair) => pair.Key === "name_prefix")).filter((block2) => block2).map((block2) => block2.Value);
       namePrefixes.push(...defaults);
     }
-    namePrefixes.push(...block.ObjectConst?.filter((pair) => pair.Key === "name_prefix").map((pair) => pair.Value) || []);
+    if (block) {
+      namePrefixes.push(...block.ObjectConst?.filter((pair) => pair.Key === "name_prefix").map((pair) => pair.Value) || []);
+    }
     let output = {
       Type: "template",
       Parts: []
@@ -301,228 +326,93 @@
   var STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/static_hosting.js:${ANYFRONT_VERSION}`;
 
   // frontend_build/build_script.template.js
-  var build_script_template_default = `const fs = require('fs');
-const path = require('path');
-const { execSync } = require('child_process');
-const processName = '{{name}}'
-const givenBuildDir = '{{build_dir}}'
-const givenBuildOutputDir = '{{build_output_dir}}'
-const givenInstallCmd = '{{install_cmd}}'
-const givenBuildCmd = '{{build_cmd}}'
-const originalWd = process.cwd();
-const givenCmdEnv = {
-    {{cmd_env}}
-}
-//TODO make this configurable
-const ignoredDirs = {
-    '.svelte-kit': true,
-    'node_modules': true,
-    '.docusaurus': true,
-}
-const packageJsonIncludeList = [
-    'react',
-    'svelte',
-    'solid-js',
-    '"vue"',
-    'preact',
-    '"lit"',
-    '@angular',
-]
+  var build_script_template_default = "const fs = require('fs');\nconst path = require('path');\nconst { execSync } = require('child_process');\nconst processName = '{{name}}'\nconst givenBuildDir = '{{build_dir}}'\nconst givenBuildOutputDir = '{{build_output_dir}}'\nconst givenBuildCmd = '{{build_cmd}}'\nconst originalWd = process.cwd();\nconst givenCmdEnv = {{cmd_env}}\nconst ignoredDirs = {{ignored_dirs}}\n\nfunction formatError(err) {\n    process.chdir(originalWd);\n    const output = {\n        frontend_build_output: {\n            [processName]: {\n                error: err\n            }\n        }\n    }\n    fs.mkdirSync(path.join(process.cwd(), 'exported_files'), {recursive: true});\n    fs.writeFileSync('output.json', JSON.stringify(output));\n}\n\nfunction formatSuccess() {\n    process.chdir(originalWd);\n    const output = {\n        frontend_build_output: {\n            [processName]: {\n                success: true\n            }\n        }\n    }\n    fs.writeFileSync('output.json', JSON.stringify(output));\n}\n\nfunction execSyncWrapper(cmd) {\n    const execOpt = {\n        stdio: 'inherit',\n        env: {\n            ...process.env,\n            ...givenCmdEnv,\n        },\n    };\n    console.log('[', cmd, ']');\n    return execSync(cmd, execOpt);\n}\n\nasync function wait(t) {\n    return new Promise(resolve => setTimeout(resolve, t))\n}\n\nasync function main() {\n    console.log('app directory: ' + givenBuildDir);\n    process.chdir(givenBuildDir);\n\n    let dirsPreBuild = fs.readdirSync('.').filter(f => fs.statSync(f).isDirectory())\n    let changedFiles = {}\n    if(!givenBuildOutputDir) {\n        let watchingDirs = {}\n        const watchHandler = (baseDir) => (eventType, filename) => {\n            filename = path.join(baseDir, filename)\n            let dir;\n            try {\n                if(fs.statSync(filename).isDirectory()) {\n                    dir = filename;\n                } else {\n                    dir = path.dirname(filename);\n                }\n            }catch (e){\n                return;\n            }\n            \n            if (dir in ignoredDirs || Object.keys(ignoredDirs).some(d => dir.startsWith(d))) {\n                return;\n            }\n            if(!(dir in watchingDirs)) {\n                watchingDirs[dir] = true;\n                fs.watch(dir, {persistent: false}, watchHandler(dir));\n            }\n\n            dir = dir.split(path.sep)[0];\n            if(dir === '.') {\n                return;\n            }\n            if (!(dir in changedFiles)) {\n                changedFiles[dir] = 1\n            }\n            changedFiles[dir] += 1;\n        }\n        fs.watch('.', {persistent: false}, watchHandler('.'));\n        dirsPreBuild.forEach(d => fs.watch(d, {persistent: false}, watchHandler(d)));\n    }\n\n    execSyncWrapper(givenBuildCmd);\n\n    let buildOutputDir = givenBuildOutputDir;\n    if(!givenBuildOutputDir) {\n        //give time for the watcher to catch up\n        await wait(5000)\n        if (Object.keys(changedFiles).length === 0) {\n            let dirsPostBuild = fs.readdirSync('.').filter(f => fs.statSync(f).isDirectory())\n            let hash = {}\n            dirsPreBuild.forEach(d => hash[d] = true)\n            let dirs = dirsPostBuild.filter(d => !hash[d])\n            if (dirs.length === 0) {\n                formatError('no_build_output_dir')\n                return\n            }\n            buildOutputDir = dirs[0]\n        } else {\n            let dirs = Object.keys(changedFiles)\n                .sort((a, b) => changedFiles[b] - changedFiles[a])\n            buildOutputDir = dirs[0]\n        }\n    }\n\n    console.log('Build finished in', buildOutputDir);\n    formatSuccess()\n    console.log('moving', path.join(originalWd, givenBuildDir, buildOutputDir), 'to', process.cwd() + '/exported_files')\n    const fullPathBuildOutputDir = path.join(originalWd, givenBuildDir, buildOutputDir)\n    try {\n        fs.renameSync(fullPathBuildOutputDir, 'exported_files')\n    }catch (err){\n        //this error is when you try to move a file across file systems\n        //sometimes you get this because of how builkit mounts file systems\n        if (err.code !== 'EXDEV') {\n            throw err;\n        }\n        console.log('failed to rename, moving with mv')\n        execSyncWrapper(`mv ${fullPathBuildOutputDir} exported_files`)\n    }\n    console.log('done moving')\n}\n\nmain();";
 
-function find(dir, fileName) {
-    const files = fs.readdirSync(dir);
+  // anyfront-lib/lib.ts
+  function findFilesInSubdirs(dir, fileName, ignoreDirs) {
+    if (!ignoreDirs) {
+      ignoreDirs = {};
+    }
+    const files = os.file.listDir(dir);
     let found = [];
-    files.forEach(file => {
-        const filePath = path.join(dir, file);
-        if (fs.statSync(filePath).isDirectory()) {
-            if (file === 'node_modules') {
-                return;
-            }
-            found = found.concat(find(filePath, fileName));
-        } else if (file === fileName) {
-            found.push(filePath);
+    files.forEach((file) => {
+      const filePath = os.path.join(dir, file);
+      const statRes = statFile(filePath);
+      if (isFailure(statRes)) {
+        return;
+      }
+      if (statRes.result.isDir) {
+        if (file in ignoreDirs) {
+          return;
         }
+        found = found.concat(findFilesInSubdirs(filePath, fileName));
+      } else if (file === fileName) {
+        found.push(filePath);
+      }
     });
     return found;
-}
-
-function filter(files, strings) {
-    return files.filter(file => {
-        const content = fs.readFileSync(file, 'utf-8');
-        return strings.some(s => content.includes(s));
-    })
-}
-
-function formatError(err) {
-    process.chdir(originalWd);
-    const output = {
-        frontend_build_output: {
-            [processName]: {
-                error: err
-            }
-        }
-    }
-    fs.mkdirSync(path.join(process.cwd(), 'exported_files'), {recursive: true});
-    fs.writeFileSync('output.json', JSON.stringify(output));
-}
-
-function formatSuccess() {
-    process.chdir(originalWd);
-    const output = {
-        frontend_build_output: {
-            [processName]: {
-                success: true
-            }
-        }
-    }
-    fs.writeFileSync('output.json', JSON.stringify(output));
-}
-
-function execSyncWrapper(cmd) {
-    const execOpt = {
-        stdio: 'inherit',
-        env: {
-            ...process.env,
-            ...givenCmdEnv,
-        },
-    };
-    console.log('[', cmd, ']');
-    return execSync(cmd, execOpt);
-}
-
-async function wait(t) {
-    return new Promise(resolve => setTimeout(resolve, t))
-}
-
-async function main() {
-    let reactAppDir = givenBuildDir;
-    if(!reactAppDir) {
-        const foundReacts = filter(find('.', 'package.json'), packageJsonIncludeList);
-        if (foundReacts.length === 0) {
-            formatError('no_package_json_found')
-            return
-        }
-        if (foundReacts.length > 1) {
-            formatError('multiple_package_json_found')
-            return
-        }
-        reactAppDir = path.dirname(foundReacts[0]);
-    }
-
-    console.log('app directory: ' + reactAppDir);
-    process.chdir(reactAppDir);
-
-    const usingYarn = fs.existsSync('yarn.lock')
-    if (givenInstallCmd) {
-        execSyncWrapper(givenInstallCmd);
-    } else if (usingYarn) {
-        execSyncWrapper('yarn install');
-    } else {
-        execSyncWrapper('npm install');
-    }
-
-    let dirsPreBuild = fs.readdirSync('.').filter(f => fs.statSync(f).isDirectory())
-    let changedFiles = {}
-    if(!givenBuildOutputDir) {
-        let watchingDirs = {}
-        const watchHandler = (baseDir) => (eventType, filename) => {
-            filename = path.join(baseDir, filename)
-            let dir;
-            try {
-                if(fs.statSync(filename).isDirectory()) {
-                    dir = filename;
-                } else {
-                    dir = path.dirname(filename);
-                }
-            }catch (e){
-                return;
-            }
-            
-            if (dir in ignoredDirs || Object.keys(ignoredDirs).some(d => dir.startsWith(d))) {
-                return;
-            }
-            if(!(dir in watchingDirs)) {
-                watchingDirs[dir] = true;
-                fs.watch(dir, {persistent: false}, watchHandler(dir));
-            }
-
-            dir = dir.split(path.sep)[0];
-            if(dir === '.') {
-                return;
-            }
-            if (!(dir in changedFiles)) {
-                changedFiles[dir] = 1
-            }
-            changedFiles[dir] += 1;
-        }
-        fs.watch('.', {persistent: false}, watchHandler('.'));
-        dirsPreBuild.forEach(d => fs.watch(d, {persistent: false}, watchHandler(d)));
-    }
-    
-    if (givenBuildCmd) {
-        execSyncWrapper(givenBuildCmd);
-    } else if (usingYarn) {
-        execSyncWrapper('yarn build');
-    } else {
-        execSyncWrapper('npm run build');
-    }
-
-    let buildOutputDir = givenBuildOutputDir;
-    if(!givenBuildOutputDir) {
-        //give time for the watcher to catch up
-        await wait(5000)
-        if (Object.keys(changedFiles).length === 0) {
-            let dirsPostBuild = fs.readdirSync('.').filter(f => fs.statSync(f).isDirectory())
-            let hash = {}
-            dirsPreBuild.forEach(d => hash[d] = true)
-            let dirs = dirsPostBuild.filter(d => !hash[d])
-            if (dirs.length === 0) {
-                formatError('no_build_output_dir')
-                return
-            }
-            buildOutputDir = dirs[0]
-        } else {
-            let dirs = Object.keys(changedFiles)
-                .sort((a, b) => changedFiles[b] - changedFiles[a])
-            buildOutputDir = dirs[0]
-        }
-    }
-
-    console.log('Build finished in', buildOutputDir);
-    formatSuccess()
-    console.log('moving', path.join(originalWd, reactAppDir, buildOutputDir), 'to', process.cwd() + '/exported_files')
-    const fullPathBuildOutputDir = path.join(originalWd, reactAppDir, buildOutputDir)
-    try {
-        fs.renameSync(fullPathBuildOutputDir, 'exported_files')
-    }catch (err){
-        if (err.code !== 'EXDEV') {
-            throw err;
-        }
-        console.log('failed to rename, moving with mv')
-        execSyncWrapper(\`mv \${fullPathBuildOutputDir} exported_files\`)
-    }
-    console.log('done moving')
-}
-
-main();`;
+  }
 
   // frontend_build/frontend_build.ts
   var container = readDatabagContainer();
   var outputDir = barbeOutputDir();
   onlyRunForLifecycleSteps(["generate"]);
+  var ignoredDirs = {
+    ".svelte-kit": true,
+    "node_modules": true,
+    ".docusaurus": true
+  };
+  var packageJsonIncludeList = [
+    "react",
+    "svelte",
+    "solid-js",
+    '"vue"',
+    "preact",
+    '"lit"',
+    "@angular"
+  ];
+  function filterFilesContaining(files, substrs) {
+    return files.filter((file) => {
+      const content = os.file.readFile(file);
+      return substrs.some((s) => content.includes(s));
+    });
+  }
   function frontendBuildIterator(bag) {
     if (!bag.Value) {
       return [];
     }
-    const [block, namePrefix] = applyDefaults(container, bag.Value);
+    const [block, _] = applyDefaults(container, bag.Value);
     const dotEnvironment = compileBlockParam(block, "environment");
+    const envObj = Object.entries(dotEnvironment).map(([k, v]) => ({ [k]: asStr(v) })).reduce((acc, next) => Object.assign(acc, next), {});
+    const fileOverrides = asVal(block.file_overrides || asSyntax({}));
+    let buildDir = asStr(block.build_dir || "");
+    if (!buildDir) {
+      const foundApps = filterFilesContaining(findFilesInSubdirs(".", "package.json", ignoredDirs), packageJsonIncludeList);
+      if (foundApps.length === 0) {
+        throwStatement(`no package.json found in current or sub directories, please provide a 'build_dir' on frontend_build.${bag.Name}`);
+      }
+      if (foundApps.length > 1) {
+        throwStatement(`multiple package.json found in current or sub directories, please provide a 'build_dir' on frontend_build.${bag.Name}`);
+      }
+      buildDir = dirname(foundApps[0]);
+    }
+    const yarnLockStat = statFile(`${buildDir}/yarn.lock`);
+    const usingYarn = isSuccess(yarnLockStat) && !yarnLockStat.result.isDir;
+    let installCmd = asStr(block.install_cmd || "");
+    if (!installCmd) {
+      installCmd = usingYarn ? "yarn install" : "npm install";
+    }
+    let buildCmd = asStr(block.build_cmd || "");
+    if (!buildCmd) {
+      buildCmd = usingYarn ? "yarn build" : "npm run build";
+    }
     const buildScript = applyMixins(build_script_template_default, {
       name: bag.Name,
-      build_dir: asStr(block.build_dir || ""),
+      build_dir: buildDir,
       build_output_dir: asStr(block.build_output_dir || ""),
-      install_cmd: asStr(block.install_cmd || ""),
-      build_cmd: asStr(block.build_cmd || ""),
-      cmd_env: Object.entries(dotEnvironment).map(([k, v]) => `"${k}": ${JSON.stringify(asStr(v))}`).join("\n")
+      build_cmd: buildCmd,
+      cmd_env: JSON.stringify(envObj),
+      ignoredDirs: JSON.stringify(ignoredDirs)
     });
     return [{
       Type: "buildkit_run_in_container",
@@ -530,18 +420,15 @@ main();`;
       Value: {
         no_cache: true,
         display_name: `Frontend build - ${bag.Name}`,
-        excludes: [
-          "**/node_modules",
-          "node_modules",
-          outputDir
-        ],
+        excludes: Object.keys(ignoredDirs).concat(outputDir),
         exported_files: {
           "exported_files": `frontend_build_${bag.Name}`,
           "output.json": `frontend_build_${bag.Name}_output.json`
         },
         read_back: `frontend_build_${bag.Name}_output.json`,
         input_files: {
-          "__barbe_build_script.cjs": buildScript
+          "__barbe_build_script.cjs": buildScript,
+          ...fileOverrides
         },
         dockerfile: `
                 FROM node:${asStr(block.nodejs_version || "18")}${asStr(block.nodejs_version_tag || "-slim")}
@@ -549,6 +436,8 @@ main();`;
                 COPY --from=src . /src
                 WORKDIR /src
 
+                ${Object.keys(fileOverrides).map((k) => `COPY --from=src ${k} ${k}`).join("\n")}
+                RUN ${installCmd}
                 RUN node __barbe_build_script.cjs`
       }
     }];
@@ -566,12 +455,8 @@ main();`;
     if (output.error) {
       const errStr = asStr(output.error);
       switch (errStr) {
-        case "no_package_json_found":
-          throw new Error(`no package.json found in current or sub directories, please provide a 'build_dir' on frontend_build block '${bag.Name}'`);
-        case "multiple_package_json_found":
-          throw new Error(`multiple package.json found in current or sub directories, please provide a 'build_dir' on frontend_build block '${bag.Name}'`);
-        case "no_build_changed_files":
-          throw new Error(`couldn't figure out where the build files were generated, please provide a 'build_output_dir' on frontend_build block '${bag.Name}' or delete any existing build output directory`);
+        case "no_build_output_dir":
+          throwStatement(`couldn't figure out where the build files were generated, please provide a 'build_output_dir' on frontend_build block '${bag.Name}' or delete any existing build output directory`);
         default:
           throw new Error(`unknown error: ${errStr}`);
       }

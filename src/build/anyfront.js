@@ -259,6 +259,9 @@
   function readDatabagContainer() {
     return JSON.parse(os.file.readFile("__barbe_input.json"));
   }
+  function barbeLifecycleStep() {
+    return os.getenv("BARBE_LIFECYCLE_STEP");
+  }
   function barbeOutputDir() {
     return os.getenv("BARBE_OUTPUT_DIR");
   }
@@ -317,18 +320,20 @@
       const globalDefaults = Object.values(container2.global_default).flatMap((group) => group.map((block2) => block2.Value)).filter((block2) => block2).flatMap((block2) => block2.ObjectConst?.filter((pair) => pair.Key === "name_prefix")).filter((block2) => block2).map((block2) => block2.Value);
       namePrefixes.push(...globalDefaults);
     }
-    let defaultName;
-    const copyFrom = block.ObjectConst?.find((pair) => pair.Key === "copy_from");
-    if (copyFrom) {
-      defaultName = asStr(copyFrom.Value);
-    } else {
-      defaultName = "";
+    let defaultName = "";
+    if (block) {
+      const copyFrom = block.ObjectConst?.find((pair) => pair.Key === "copy_from");
+      if (copyFrom) {
+        defaultName = asStr(copyFrom.Value);
+      }
     }
     if (container2.default && container2.default[defaultName]) {
       const defaults = container2.default[defaultName].map((bag) => bag.Value).filter((block2) => block2).flatMap((block2) => block2.ObjectConst?.filter((pair) => pair.Key === "name_prefix")).filter((block2) => block2).map((block2) => block2.Value);
       namePrefixes.push(...defaults);
     }
-    namePrefixes.push(...block.ObjectConst?.filter((pair) => pair.Key === "name_prefix").map((pair) => pair.Value) || []);
+    if (block) {
+      namePrefixes.push(...block.ObjectConst?.filter((pair) => pair.Key === "name_prefix").map((pair) => pair.Value) || []);
+    }
     let output = {
       Type: "template",
       Parts: []
@@ -372,7 +377,8 @@
     return output;
   }
   function executePipelineGroup(container2, pipelines) {
-    let maxStep = pipelines.map((p) => p.steps.length).reduce((a, b) => Math.max(a, b), 0);
+    const lifecycleStep = barbeLifecycleStep();
+    const maxStep = pipelines.map((p) => p.steps.length).reduce((a, b) => Math.max(a, b), 0);
     let previousStepResult = {};
     let history = [];
     for (let i = 0; i < maxStep; i++) {
@@ -380,14 +386,28 @@
       let stepImports = [];
       let stepTransforms = [];
       let stepDatabags = [];
+      let stepNames = [];
       for (let pipeline of pipelines) {
         if (i >= pipeline.steps.length) {
           continue;
         }
-        let stepRequests = pipeline.steps[i]({
+        const stepMeta = pipeline.steps[i];
+        if (stepMeta.name) {
+          stepNames.push(stepMeta.name);
+        }
+        if (stepMeta.lifecycleSteps && stepMeta.lifecycleSteps.length > 0) {
+          if (!stepMeta.lifecycleSteps.includes(lifecycleStep)) {
+            console.log(`skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} of pipeline ${pipeline.name} because lifecycle step is ${lifecycleStep} and step is only for ${stepMeta.lifecycleSteps.join(", ")}`);
+            continue;
+          }
+        }
+        console.log(`running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} of pipeline ${pipeline.name}`);
+        console.log(`step ${i} input:`, JSON.stringify(previousStepResult));
+        let stepRequests = stepMeta.f({
           previousStepResult,
           history
         });
+        console.log(`step ${i} requests:`, JSON.stringify(stepRequests));
         if (!stepRequests) {
           continue;
         }
@@ -412,7 +432,11 @@
       if (stepDatabags.length > 0) {
         exportDatabags(stepDatabags);
       }
-      history.push(previousStepResult);
+      console.log(`step ${i} output:`, JSON.stringify(stepResults));
+      history.push({
+        databags: stepResults,
+        stepNames
+      });
       previousStepResult = stepResults;
     }
   }

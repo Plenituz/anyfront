@@ -1,4 +1,4 @@
-import { readDatabagContainer, barbeLifecycleStep, Databag, SugarCoatedDatabag, asStr, appendToTemplate, asTraversal, asBlock, asTemplate, asSyntax, asVal, SyntaxToken, ImportComponentInput, barbeOutputDir, exportDatabags, importComponents, iterateBlocks, BarbeState, DatabagContainer, asValArrayConst, applyTransformers } from '../../../barbe-serverless/src/barbe-std/utils';
+import { readDatabagContainer, barbeLifecycleStep, Databag, SugarCoatedDatabag, asStr, appendToTemplate, asTraversal, asBlock, asTemplate, asSyntax, asVal, SyntaxToken, ImportComponentInput, barbeOutputDir, exportDatabags, importComponents, iterateBlocks, BarbeState, DatabagContainer, asValArrayConst, applyTransformers, throwStatement } from '../../../barbe-serverless/src/barbe-std/utils';
 import { applyDefaults, applyMixins, getAwsCreds, preConfCloudResourceFactory } from '../../../barbe-serverless/src/barbe-sls-lib/lib';
 import lister_go from './lister.go';
 import base_script from './origin_request.template.js';
@@ -243,7 +243,7 @@ function generateIterator1(bag: Databag): DBAndImport[] {
         if (domainNames.length > 0) {
             localDatabags.push(
                 cloudData('aws_route53_zone', 'zone', {
-                    name: block.zone || guessAwsDnsZoneBasedOnDomainName(domainNames[0]) || (() => {throw new Error('no \'zone\' given and could not guess based on domain name')})()
+                    name: block.zone || guessAwsDnsZoneBasedOnDomainName(domainNames[0]) || throwStatement('no \'zone\' given and could not guess based on domain name')
                 }),
                 ...domainNames.map((domainName, i) => cloudResource('aws_route53_record', `cf_distrib_domain_record_${i}`, {
                     zone_id: asTraversal('data.aws_route53_zone.zone.zone_id'),

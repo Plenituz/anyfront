@@ -1,5 +1,5 @@
 # https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review
-#    ?templateURL=https://hub.barbe.app/anyfront/try.cloudformation.yml
+#    ?templateURL=https://s3.amazonaws.com/anyfront.dev/try.cloudformation.yml
 #    &stackName=anyfront-1click-deploy
 #    &param_GitUrl=...
 #    &param_DomainName=...
@@ -33,6 +33,7 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              - Effect: 
               - Effect: Allow
                 Action:
                   - 'lambda:*' # anyfront uses Lambda@Edge
@@ -59,6 +60,7 @@ Resources:
                   - 'cloudfront:*'
                   # anyfront uses Route53 to create the DNS records
                   - 'route53:*'
+                  - 'route53:ListHostedZones'
                   # anyfront uses ACM to create the certificates
                   - 'acm:*'
                 Resource:
@@ -66,7 +68,7 @@ Resources:
                   - !Sub 'arn:aws:iam::*:role/anyfront-*'
                   - !Sub 'arn:aws:s3:::anyfront-*'
                   - !Sub 'arn:aws:cloudfront:::distribution/anyfront-*'
-                  - !Sub 'arn:aws:route53:::hostedzone/anyfront-*'
+                  - !Sub 'arn:aws:route53:::*'
                   - !Sub 'arn:aws:acm:*:*:certificate/anyfront-*'
                   - !Sub 'arn:aws:logs:*:*:log-group:anyfront-*'
                   - !Sub 'arn:aws:logs:*:*:log-group:build/anyfront-*'

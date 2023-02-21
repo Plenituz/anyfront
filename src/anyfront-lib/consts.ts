@@ -7,6 +7,7 @@ export const AWS_CLOUDFRONT_STATIC_HOSTING = 'aws_cloudfront_static_hosting'
 export const STATIC_HOSTING = 'static_hosting'
 export const AWS_NEXT_JS = 'aws_next_js'
 export const GCP_NEXT_JS = 'gcp_next_js'
+export const AWS_SVELTEKIT = 'aws_sveltekit'
 export const ANYFRONT = 'anyfront'
 
 

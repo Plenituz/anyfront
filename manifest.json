@@ -3,9 +3,10 @@
         "barbe-serverless/manifest.json:v0.2.1"
     ],
     "components": [
-        "anyfront/static_hosting.js:v0.2.1",
-        "anyfront/aws_next_js.js:v0.2.1",
-        "anyfront/gcp_next_js.js:v0.2.1",
-        "anyfront/anyfront.js:v0.2.1"
+        "anyfront/static_hosting.js:v0.2.2",
+        "anyfront/aws_next_js.js:v0.2.2",
+        "anyfront/gcp_next_js.js:v0.2.2",
+        "anyfront/aws_sveltekit.js:v0.2.2",
+        "anyfront/anyfront.js:v0.2.2"
     ]
 }

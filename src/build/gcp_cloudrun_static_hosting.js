@@ -503,18 +503,20 @@
       const globalDefaults = Object.values(container2.global_default).flatMap((group) => group.map((block2) => block2.Value)).filter((block2) => block2).flatMap((block2) => block2.ObjectConst?.filter((pair) => pair.Key === "name_prefix")).filter((block2) => block2).map((block2) => block2.Value);
       namePrefixes.push(...globalDefaults);
     }
-    let defaultName;
-    const copyFrom = block.ObjectConst?.find((pair) => pair.Key === "copy_from");
-    if (copyFrom) {
-      defaultName = asStr(copyFrom.Value);
-    } else {
-      defaultName = "";
+    let defaultName = "";
+    if (block) {
+      const copyFrom = block.ObjectConst?.find((pair) => pair.Key === "copy_from");
+      if (copyFrom) {
+        defaultName = asStr(copyFrom.Value);
+      }
     }
     if (container2.default && container2.default[defaultName]) {
       const defaults = container2.default[defaultName].map((bag) => bag.Value).filter((block2) => block2).flatMap((block2) => block2.ObjectConst?.filter((pair) => pair.Key === "name_prefix")).filter((block2) => block2).map((block2) => block2.Value);
       namePrefixes.push(...defaults);
     }
-    namePrefixes.push(...block.ObjectConst?.filter((pair) => pair.Key === "name_prefix").map((pair) => pair.Value) || []);
+    if (block) {
+      namePrefixes.push(...block.ObjectConst?.filter((pair) => pair.Key === "name_prefix").map((pair) => pair.Value) || []);
+    }
     let output = {
       Type: "template",
       Parts: []
@@ -606,7 +608,7 @@
     return `${stateKey}_destroy_missing_`;
   }
   function emptyExecuteTemplate(container2, state2, blockType, stateKey) {
-    const stateObj = state2[stateKey];
+    const stateObj = state2[stateKey] || {};
     if (!stateObj) {
       return [];
     }
@@ -619,6 +621,7 @@
         Type: "terraform_empty_execute",
         Name: `${emptyExecuteBagNamePrefix(stateKey)}${bagName}`,
         Value: {
+          display_name: `Destroy missing ${blockType}.${bagName}`,
           mode: "apply",
           template_json: JSON.stringify({
             terraform: (() => {

@@ -111,11 +111,12 @@ static_hosting "my-react-app-gcp" {
 | Docusaurus  | [✓](examples/docusaurus_aws/)   | [✓](examples/docusaurus_gcp/)   |
 | Next.js     | [✓](examples/nextjs_aws/)   | [✓](examples/nextjs_gcp/)   |
 | Svelte SPA  | [✓](examples/svelte_spa_aws/)   | [✓](examples/svelte_spa_gcp/)   |
+| SvelteKit   | [✓](examples/sveltekit_aws/) | 🔜 |
 | Vue SPA     | [✓](examples/vue_aws/)  | [✓](examples/vue_gcp/)  |
 | SolidJS SPA | [✓](examples/solidjs_aws/)  | [✓](examples/solidjs_gcp/)  |
 | Any containerized website | 🔜 | 🔜 |
 | SolidStart  | 🔜 | 🔜 |
-| SvelteKit   | 🔜 | 🔜 |
+
 | Astro       | 🔜 | 🔜 |
 
 > We'll add more examples, platforms and frameworks as we go. Feel free to create/upvote an issue for your favorite framework/platform so we can prioritize it.

@@ -1,8 +1,9 @@
-import { asStr, BarbeState, Databag, DatabagContainer, ImportComponentInput, isSimpleTemplate, SugarCoatedDatabag, SyntaxToken, visitTokens, statFile } from '../../../barbe-serverless/src/barbe-std/utils';
+import { asStr, BarbeState, Databag, DatabagContainer, ImportComponentInput, isSimpleTemplate, SugarCoatedDatabag, SyntaxToken, visitTokens, statFile, iterateBlocks, throwStatement, asBlock, exportDatabags } from '../../../barbe-serverless/src/barbe-std/utils';
 import * as _ from '../../../barbe-serverless/src/barbe-std/spidermonkey-globals';
 import { isFailure } from '../../../barbe-serverless/src/barbe-std/rpc';
 import { TERRAFORM_EXECUTE_URL } from './consts';
-import { Pipeline, pipeline } from './pipeline';
+import { Pipeline, pipeline, step } from './pipeline';
+import { applyDefaults, compileBlockParam } from '../../../barbe-serverless/src/barbe-sls-lib/lib';
 
 export type DBAndImport = {
     databags: (Databag | SugarCoatedDatabag)[]
@@ -252,4 +253,42 @@ export function autoDeleteMissing(container: DatabagContainer, blockName: string
         return { databags }
     })
     return [applyPipe, destroyPipe]
+}
+
+export function autoCreateStateStore(container: DatabagContainer, blockName: string, kind: 's3' | 'gcs'): Pipeline {
+    if(container.state_store) {
+        return pipeline([])
+    }
+    return pipeline([
+        step(() => {
+            const databags = iterateBlocks(container, blockName, (bag) => {
+                const [block, namePrefix] = applyDefaults(container, bag.Value!)
+                if(!isSimpleTemplate(namePrefix)) {
+                    return []
+                }
+                let value = {
+                    name_prefix: [`${bag.Name}-`],
+                }
+                switch(kind) {
+                    case 's3':
+                        value['s3'] = asBlock([{}])
+                        break
+                    case 'gcs':
+                        const dotGcpProject = compileBlockParam(block, 'google_cloud_project')
+                        value['gcs'] = asBlock([{
+                            project_id: block.google_cloud_project_id || block.project_id || dotGcpProject.project_id,
+                        }])
+                        break
+                    default:
+                        throwStatement(`Unknown state_store kind '${kind}'`)
+                }
+                return [{
+                    Type: 'state_store',
+                    Name: '',
+                    Value: value
+                }]
+            }).flat()
+            return { databags }
+        }, { lifecycleSteps: ['pre_generate'] })
+    ])
 }

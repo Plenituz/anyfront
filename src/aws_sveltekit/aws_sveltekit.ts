@@ -1,10 +1,9 @@
 import { applyDefaults, compileBlockParam, getAwsCreds, preConfCloudResourceFactory } from "../../../barbe-serverless/src/barbe-sls-lib/lib"
 import { readDatabagContainer, barbeOutputDir, Databag, SugarCoatedDatabag, appendToTemplate, asTraversal, asBlock, asTemplate, asFuncCall, throwStatement, allGenerateSteps, ImportComponentInput, SyntaxToken, asSyntax, asStr, statFile, asVal, iterateBlocks, exportDatabags, asValArrayConst } from '../../../barbe-serverless/src/barbe-std/utils';
 import { AWS_IAM_URL, AWS_LAMBDA_URL, AWS_SVELTEKIT, TERRAFORM_EXECUTE_URL, AWS_S3_SYNC_URL, AWS_S3_SYNC_FILES } from '../anyfront-lib/consts';
-import { autoDeleteMissing, guessAwsDnsZoneBasedOnDomainName, prependTfStateFileName } from "../anyfront-lib/lib"
+import { autoCreateStateStore, autoDeleteMissing, guessAwsDnsZoneBasedOnDomainName, prependTfStateFileName } from "../anyfront-lib/lib"
 import { Pipeline, pipeline, executePipelineGroup, getHistoryItem } from '../anyfront-lib/pipeline';
 import { AWS_FUNCTION, AWS_IAM_LAMBDA_ROLE } from '../../../barbe-serverless/src/barbe-sls-lib/consts';
-import { isFailure } from '../../../barbe-serverless/src/barbe-std/rpc';
 import svelteConfigJs from './svelte.config.template.js'
 
 const container = readDatabagContainer()
@@ -515,5 +514,6 @@ function awsSveltekit(bag: Databag): Pipeline[] {
 
 executePipelineGroup(container, [
     ...iterateBlocks(container, AWS_SVELTEKIT, awsSveltekit).flat(),
-    ...autoDeleteMissing(container, AWS_SVELTEKIT)
+    ...autoDeleteMissing(container, AWS_SVELTEKIT),
+    autoCreateStateStore(container, AWS_SVELTEKIT, 's3')
 ])

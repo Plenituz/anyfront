@@ -444,6 +444,9 @@
     }
     return resp.result;
   }
+  function throwStatement(message) {
+    throw new Error(message);
+  }
   function readDatabagContainer() {
     return JSON.parse(os.file.readFile("__barbe_input.json"));
   }
@@ -513,18 +516,20 @@
       const globalDefaults = Object.values(container2.global_default).flatMap((group) => group.map((block2) => block2.Value)).filter((block2) => block2).flatMap((block2) => block2.ObjectConst?.filter((pair) => pair.Key === "name_prefix")).filter((block2) => block2).map((block2) => block2.Value);
       namePrefixes.push(...globalDefaults);
     }
-    let defaultName;
-    const copyFrom = block.ObjectConst?.find((pair) => pair.Key === "copy_from");
-    if (copyFrom) {
-      defaultName = asStr(copyFrom.Value);
-    } else {
-      defaultName = "";
+    let defaultName = "";
+    if (block) {
+      const copyFrom = block.ObjectConst?.find((pair) => pair.Key === "copy_from");
+      if (copyFrom) {
+        defaultName = asStr(copyFrom.Value);
+      }
     }
     if (container2.default && container2.default[defaultName]) {
       const defaults = container2.default[defaultName].map((bag) => bag.Value).filter((block2) => block2).flatMap((block2) => block2.ObjectConst?.filter((pair) => pair.Key === "name_prefix")).filter((block2) => block2).map((block2) => block2.Value);
       namePrefixes.push(...defaults);
     }
-    namePrefixes.push(...block.ObjectConst?.filter((pair) => pair.Key === "name_prefix").map((pair) => pair.Value) || []);
+    if (block) {
+      namePrefixes.push(...block.ObjectConst?.filter((pair) => pair.Key === "name_prefix").map((pair) => pair.Value) || []);
+    }
     let output = {
       Type: "template",
       Parts: []
@@ -587,6 +592,7 @@
   var GCP_CLOUDRUN_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/gcp_cloudrun_static_hosting.js:${ANYFRONT_VERSION}`;
   var AWS_NEXT_JS_URL = `https://hub.barbe.app/anyfront/aws_next_js.js:${ANYFRONT_VERSION}`;
   var GCP_NEXT_JS_URL = `https://hub.barbe.app/anyfront/gcp_next_js.js:${ANYFRONT_VERSION}`;
+  var AWS_SVELTEKIT_URL = `https://hub.barbe.app/anyfront/aws_sveltekit.js:${ANYFRONT_VERSION}`;
   var AWS_CLOUDFRONT_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/aws_cloudfront_static_hosting.js:${ANYFRONT_VERSION}`;
   var STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/static_hosting.js:${ANYFRONT_VERSION}`;
 
@@ -595,7 +601,7 @@
     return `${stateKey}_destroy_missing_`;
   }
   function emptyExecuteTemplate(container2, state2, blockType, stateKey) {
-    const stateObj = state2[stateKey];
+    const stateObj = state2[stateKey] || {};
     if (!stateObj) {
       return [];
     }
@@ -608,6 +614,7 @@
         Type: "terraform_empty_execute",
         Name: `${emptyExecuteBagNamePrefix(stateKey)}${bagName}`,
         Value: {
+          display_name: `Destroy missing ${blockType}.${bagName}`,
           mode: "apply",
           template_json: JSON.stringify({
             terraform: (() => {
@@ -666,6 +673,9 @@
     return visitTokens(container2["cr_[terraform]"][""][0].Value, visitor);
   }
   function guessAwsDnsZoneBasedOnDomainName(domainName) {
+    if (!domainName) {
+      return null;
+    }
     if (!isSimpleTemplate(domainName)) {
       return null;
     }
@@ -683,7 +693,8 @@
   var AWS_FUNCTION = "aws_function";
   var AWS_IAM_LAMBDA_ROLE = "aws_iam_lambda_role";
   var BARBE_SLS_VERSION2 = "v0.2.2";
-  var TERRAFORM_EXECUTE_URL2 = `https://hub.barbe.app/barbe-serverless/terraform_execute.js:${BARBE_SLS_VERSION2}`;
+  var TERRAFORM_EXECUTE_URL2 = `barbe-serverless/terraform_execute.js:${BARBE_SLS_VERSION2}`;
+  var AWS_NETWORK_URL = `barbe-serverless/aws_network.js:${BARBE_SLS_VERSION2}`;
 
   // aws_next_js.ts
   var container = readDatabagContainer();
@@ -1088,9 +1099,7 @@
     if (domainNames.length > 0) {
       databags.push(
         cloudData("aws_route53_zone", "zone", {
-          name: dotDomain.zone || guessAwsDnsZoneBasedOnDomainName(domainNames[0]) || (() => {
-            throw new Error("no 'zone' given and could not guess based on domain name");
-          })()
+          name: dotDomain.zone || guessAwsDnsZoneBasedOnDomainName(domainNames[0]) || throwStatement("no 'zone' given and could not guess based on domain name")
         }),
         ...domainNames.map((domainName, i) => cloudResource("aws_route53_record", `cf_distrib_domain_record_${i}`, {
           zone_id: asTraversal("data.aws_route53_zone.zone.zone_id"),

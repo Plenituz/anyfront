@@ -1,9 +1,9 @@
 import { barbeLifecycleStep, readDatabagContainer, statFile, barbeOutputDir, iterateBlocks, asStr, Databag, SyntaxToken, asSyntax, asVal, exportDatabags, isSimpleTemplate } from '../../barbe-serverless/src/barbe-std/utils';
 import * as _ from '../../barbe-serverless/src/barbe-std/spidermonkey-globals';
 import { isFailure } from '../../barbe-serverless/src/barbe-std/rpc';
-import { ANYFRONT, STATIC_HOSTING, STATIC_HOSTING_URL, AWS_NEXT_JS, AWS_NEXT_JS_URL, GCP_NEXT_JS_URL, GCP_NEXT_JS } from './anyfront-lib/consts';
+import { ANYFRONT, STATIC_HOSTING, STATIC_HOSTING_URL, AWS_NEXT_JS, AWS_NEXT_JS_URL, GCP_NEXT_JS_URL, GCP_NEXT_JS, AWS_SVELTEKIT, AWS_SVELTEKIT_URL } from './anyfront-lib/consts';
 import { applyDefaults, DatabagObjVal, compileBlockParam } from '../../barbe-serverless/src/barbe-sls-lib/lib';
-import { Pipeline, executePipelineGroup, Step } from './anyfront-lib/pipeline';
+import { Pipeline, executePipelineGroup, Step, step } from './anyfront-lib/pipeline';
 
 const container = readDatabagContainer()
 
@@ -108,7 +108,7 @@ function findAppDirs(dir: string): CrawlResult[] {
 function staticHostingPipeline(app: AppBundle): Step[] {
     const { bag, block, appInfo } = app
     return [
-        () => ({
+        step(() => ({
             imports: [{
                 url: STATIC_HOSTING_URL,
                 copyFromContainer: [
@@ -131,15 +131,37 @@ function staticHostingPipeline(app: AppBundle): Step[] {
                     }
                 }]
             }]
-        }),
-        ({previousStepResult}) => exportDatabags(previousStepResult)
+        })),
+        step(({previousStepResult}) => exportDatabags(previousStepResult))
+    ]
+}
+
+function sveltekitAwsPipeline(app: AppBundle): Step[] {
+    const { bag, block, appInfo } = app
+    return [
+        step(() => ({
+            imports: [{
+                url: AWS_SVELTEKIT_URL,
+                copyFromContainer: ['cr_[terraform]', 'default', 'global_default'],
+                input: [{
+                    Type: AWS_SVELTEKIT,
+                    Name: bag.Name,
+                    Value: {
+                        ...block,
+                        app_dir: appInfo.location,
+                        ...app.extraSettings,
+                    }
+                }]
+            }]
+        })),
+        step(({previousStepResult}) => exportDatabags(previousStepResult))
     ]
 }
 
 function nextAwsPipeline(app: AppBundle): Step[] {
     const { bag, block, appInfo } = app
     return [
-        () => ({
+        step(() => ({
             imports: [{
                 url: AWS_NEXT_JS_URL,
                 copyFromContainer: ['cr_[terraform]', 'default', 'global_default'],
@@ -153,15 +175,15 @@ function nextAwsPipeline(app: AppBundle): Step[] {
                     }
                 }]
             }]
-        }),
-        ({previousStepResult}) => exportDatabags(previousStepResult)
+        })),
+        step(({previousStepResult}) => exportDatabags(previousStepResult))
     ]
 }
 
 function nextGcpPipeline(app: AppBundle): Step[] {
     const { bag, block, appInfo } = app
     return [
-        () => ({
+        step(() => ({
             imports: [{
                 url: GCP_NEXT_JS_URL,
                 copyFromContainer: ['cr_[terraform]', 'default', 'global_default'],
@@ -175,8 +197,8 @@ function nextGcpPipeline(app: AppBundle): Step[] {
                     }
                 }]
             }]
-        }),
-        ({previousStepResult}) => exportDatabags(previousStepResult)
+        })),
+        step(({previousStepResult}) => exportDatabags(previousStepResult))
     ]
 }
 
@@ -214,8 +236,16 @@ function makeAppPipeline(app: AppBundle): Pipeline {
                     throw new Error(`next.js not supported on platform '${platform}'`)
             }
             break
+        case 'sveltekit':
+            switch(platform) {
+                case 'aws':
+                    steps = sveltekitAwsPipeline(app)
+                    break
+                default:
+                    throw new Error(`sveltkit not supported on platform '${platform}' yet`)
+            }
+            break
         // case 'solidstart':
-        // case 'sveltekit':
         //     throw new Error(`framework '${appInfo.framework}' not supported yet`)
     }
     return {

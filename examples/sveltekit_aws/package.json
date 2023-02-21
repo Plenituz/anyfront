@@ -1,0 +1,24 @@
+{
+	"name": "realworld.svelte.dev",
+	"version": "1.0.1-next.0",
+	"private": true,
+	"license": "MIT",
+	"type": "module",
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite preview",
+		"lint": "prettier --check --plugin-search-dir=. .",
+		"format": "prettier --write --plugin-search-dir=. ."
+	},
+	"devDependencies": {
+		"@sveltejs/adapter-vercel": "^1.0.0",
+		"@sveltejs/kit": "^1.0.0",
+		"marked": "^4.2.1",
+		"prettier": "^2.7.1",
+		"prettier-plugin-svelte": "^2.8.0",
+		"svelte": "^3.54.0",
+		"typescript": "^4.9.4",
+		"vite": "^4.0.0"
+	}
+}

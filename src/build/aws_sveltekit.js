@@ -627,6 +627,7 @@
   var GCP_CLOUDRUN_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/gcp_cloudrun_static_hosting.js:${ANYFRONT_VERSION}`;
   var AWS_NEXT_JS_URL = `https://hub.barbe.app/anyfront/aws_next_js.js:${ANYFRONT_VERSION}`;
   var GCP_NEXT_JS_URL = `https://hub.barbe.app/anyfront/gcp_next_js.js:${ANYFRONT_VERSION}`;
+  var AWS_SVELTEKIT_URL = `https://hub.barbe.app/anyfront/aws_sveltekit.js:${ANYFRONT_VERSION}`;
   var AWS_CLOUDFRONT_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/aws_cloudfront_static_hosting.js:${ANYFRONT_VERSION}`;
   var STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/static_hosting.js:${ANYFRONT_VERSION}`;
 
@@ -880,6 +881,43 @@
     });
     return [applyPipe, destroyPipe];
   }
+  function autoCreateStateStore(container2, blockName, kind) {
+    if (container2.state_store) {
+      return pipeline([]);
+    }
+    return pipeline([
+      step(() => {
+        const databags = iterateBlocks(container2, blockName, (bag) => {
+          const [block, namePrefix] = applyDefaults(container2, bag.Value);
+          if (!isSimpleTemplate(namePrefix)) {
+            return [];
+          }
+          let value = {
+            name_prefix: [`${bag.Name}-`]
+          };
+          switch (kind) {
+            case "s3":
+              value["s3"] = asBlock([{}]);
+              break;
+            case "gcs":
+              const dotGcpProject = compileBlockParam(block, "google_cloud_project");
+              value["gcs"] = asBlock([{
+                project_id: block.google_cloud_project_id || block.project_id || dotGcpProject.project_id
+              }]);
+              break;
+            default:
+              throwStatement(`Unknown state_store kind '${kind}'`);
+          }
+          return [{
+            Type: "state_store",
+            Name: "",
+            Value: value
+          }];
+        }).flat();
+        return { databags };
+      }, { lifecycleSteps: ["pre_generate"] })
+    ]);
+  }
 
   // ../../barbe-serverless/src/barbe-sls-lib/consts.ts
   var AWS_FUNCTION = "aws_function";
@@ -889,7 +927,7 @@
   var AWS_NETWORK_URL = `barbe-serverless/aws_network.js:${BARBE_SLS_VERSION2}`;
 
   // aws_sveltekit/svelte.config.template.js
-  var svelte_config_template_default = `import customer_svelteConfig from "./customer_svelte.config.js";
+  var svelte_config_template_default = `const customer_svelteConfig = import("./customer_svelte.config.js");
 import adapter from '@yarbsemaj/adapter-lambda'
 
 if(!customer_svelteConfig.kit) customer_svelteConfig.kit = {}
@@ -1391,6 +1429,7 @@ export default customer_svelteConfig`;
   }
   executePipelineGroup(container, [
     ...iterateBlocks(container, AWS_SVELTEKIT, awsSveltekit).flat(),
-    ...autoDeleteMissing(container, AWS_SVELTEKIT)
+    ...autoDeleteMissing(container, AWS_SVELTEKIT),
+    autoCreateStateStore(container, AWS_SVELTEKIT, "s3")
   ]);
 })();

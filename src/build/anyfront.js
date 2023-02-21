@@ -270,6 +270,7 @@
   var STATIC_HOSTING = "static_hosting";
   var AWS_NEXT_JS = "aws_next_js";
   var GCP_NEXT_JS = "gcp_next_js";
+  var AWS_SVELTEKIT = "aws_sveltekit";
   var ANYFRONT = "anyfront";
   var BARBE_SLS_VERSION = "v0.2.2";
   var ANYFRONT_VERSION = "v0.2.2";
@@ -282,6 +283,7 @@
   var GCP_CLOUDRUN_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/gcp_cloudrun_static_hosting.js:${ANYFRONT_VERSION}`;
   var AWS_NEXT_JS_URL = `https://hub.barbe.app/anyfront/aws_next_js.js:${ANYFRONT_VERSION}`;
   var GCP_NEXT_JS_URL = `https://hub.barbe.app/anyfront/gcp_next_js.js:${ANYFRONT_VERSION}`;
+  var AWS_SVELTEKIT_URL = `https://hub.barbe.app/anyfront/aws_sveltekit.js:${ANYFRONT_VERSION}`;
   var AWS_CLOUDFRONT_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/aws_cloudfront_static_hosting.js:${ANYFRONT_VERSION}`;
   var STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/static_hosting.js:${ANYFRONT_VERSION}`;
 
@@ -440,6 +442,12 @@
       previousStepResult = stepResults;
     }
   }
+  function step(f, params) {
+    return {
+      ...params,
+      f
+    };
+  }
 
   // anyfront.ts
   var container = readDatabagContainer();
@@ -520,7 +528,7 @@
   function staticHostingPipeline(app) {
     const { bag, block, appInfo } = app;
     return [
-      () => ({
+      step(() => ({
         imports: [{
           url: STATIC_HOSTING_URL,
           copyFromContainer: [
@@ -543,14 +551,35 @@
             }
           }]
         }]
-      }),
-      ({ previousStepResult }) => exportDatabags(previousStepResult)
+      })),
+      step(({ previousStepResult }) => exportDatabags(previousStepResult))
+    ];
+  }
+  function sveltekitAwsPipeline(app) {
+    const { bag, block, appInfo } = app;
+    return [
+      step(() => ({
+        imports: [{
+          url: AWS_SVELTEKIT_URL,
+          copyFromContainer: ["cr_[terraform]", "default", "global_default"],
+          input: [{
+            Type: AWS_SVELTEKIT,
+            Name: bag.Name,
+            Value: {
+              ...block,
+              app_dir: appInfo.location,
+              ...app.extraSettings
+            }
+          }]
+        }]
+      })),
+      step(({ previousStepResult }) => exportDatabags(previousStepResult))
     ];
   }
   function nextAwsPipeline(app) {
     const { bag, block, appInfo } = app;
     return [
-      () => ({
+      step(() => ({
         imports: [{
           url: AWS_NEXT_JS_URL,
           copyFromContainer: ["cr_[terraform]", "default", "global_default"],
@@ -564,14 +593,14 @@
             }
           }]
         }]
-      }),
-      ({ previousStepResult }) => exportDatabags(previousStepResult)
+      })),
+      step(({ previousStepResult }) => exportDatabags(previousStepResult))
     ];
   }
   function nextGcpPipeline(app) {
     const { bag, block, appInfo } = app;
     return [
-      () => ({
+      step(() => ({
         imports: [{
           url: GCP_NEXT_JS_URL,
           copyFromContainer: ["cr_[terraform]", "default", "global_default"],
@@ -585,8 +614,8 @@
             }
           }]
         }]
-      }),
-      ({ previousStepResult }) => exportDatabags(previousStepResult)
+      })),
+      step(({ previousStepResult }) => exportDatabags(previousStepResult))
     ];
   }
   function makeAppPipeline(app) {
@@ -618,6 +647,15 @@
             break;
           default:
             throw new Error(`next.js not supported on platform '${platform}'`);
+        }
+        break;
+      case "sveltekit":
+        switch (platform) {
+          case "aws":
+            steps = sveltekitAwsPipeline(app);
+            break;
+          default:
+            throw new Error(`sveltkit not supported on platform '${platform}' yet`);
         }
         break;
     }

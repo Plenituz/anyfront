@@ -725,10 +725,11 @@
           name_prefix: [`${bag.Name}-`],
           root_object: block.root_object,
           region: block.region || os.getenv("AWS_REGION") || "us-east-1",
-          zone: dotDomain.zone,
-          domain_names: dotDomain.name ? [dotDomain.name] : void 0,
-          certificate_domain_to_create: dotDomain.name,
-          build_dir: buildOutputDir
+          build_dir: buildOutputDir,
+          domain: asBlock([{
+            certificate_domain_to_create: dotDomain.name,
+            ...dotDomain
+          }])
         }
       });
     };

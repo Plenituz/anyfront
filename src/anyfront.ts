@@ -262,7 +262,6 @@ type AppBundle = {
     extraSettings?: any
 }
 
-
 function dostuff() {
     const foundApps = iterateBlocks(container, ANYFRONT, (bag): AppBundle | null => {
         if(!bag.Value) {

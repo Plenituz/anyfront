@@ -5,6 +5,7 @@ import { autoCreateStateStore, autoDeleteMissing, guessAwsDnsZoneBasedOnDomainNa
 import { Pipeline, pipeline, executePipelineGroup, getHistoryItem } from '../anyfront-lib/pipeline';
 import { AWS_FUNCTION, AWS_IAM_LAMBDA_ROLE } from '../../../barbe-serverless/src/barbe-sls-lib/consts';
 import svelteConfigJs from './svelte.config.template.js'
+import { awsDomainBlockResources } from '../../../barbe-serverless/src/barbe-sls-lib/helpers';
 
 const container = readDatabagContainer()
 const outputDir = barbeOutputDir()
@@ -17,7 +18,6 @@ function awsSveltekit(bag: Databag): Pipeline[] {
     const pipe = pipeline([], { name: `aws_sveltekit.${bag.Name}` })
     const dotBuild = compileBlockParam(block, 'build')
     const dotDomain = compileBlockParam(block, 'domain')
-    const domainNames: SyntaxToken[] = dotDomain.name ? [dotDomain.name] : []
     const nodeJsVersion = asStr(dotBuild.nodejs_version || block.nodejs_version || '16')
 
     const dir = `aws_sveltekit_${bag.Name}`
@@ -125,6 +125,14 @@ function awsSveltekit(bag: Databag): Pipeline[] {
     }
 
     const makeResources = (): SugarCoatedDatabag[] => {
+        const domainBlock = awsDomainBlockResources({
+            dotDomain,
+            domainValue: asTraversal("aws_cloudfront_distribution.distribution.domain_name"),
+            resourcePrefix: '',
+            apexHostedZoneId: asTraversal('aws_cloudfront_distribution.distribution.hosted_zone_id'),
+            cloudData,
+            cloudResource,
+        })
         let databags: SugarCoatedDatabag[] = [
             cloudProvider('', 'aws', {
                 region: block.region || os.getenv('AWS_REGION') || 'us-east-1',
@@ -276,41 +284,17 @@ function awsSveltekit(bag: Databag): Pipeline[] {
                     }]),
                 }]),
     
-                aliases: domainNames,
+                aliases: domainBlock?.domainNames || [],
                 viewer_certificate: asBlock([
                     (() => {
                         const minimumProtocolVersion = 'TLSv1.2_2021'
-                        if(domainNames.length === 0) {
+                        if(!domainBlock) {
                             return {
                                 cloudfront_default_certificate: true
                             }
                         }
-                        if(dotDomain.certificate_arn) {
-                            return {
-                                acm_certificate_arn: dotDomain.certificate_arn,
-                                ssl_support_method: 'sni-only',
-                                minimum_protocol_version: minimumProtocolVersion
-                            }
-                        }
-                        if (dotDomain.existing_certificate_domain) {
-                            return {
-                                acm_certificate_arn: asTraversal(`data.aws_acm_certificate.imported_certificate.arn`),
-                                ssl_support_method: 'sni-only',
-                                minimum_protocol_version: minimumProtocolVersion
-                            }
-                        }
-                        if(dotDomain.certificate_domain_to_create) {
-                            return {
-                                acm_certificate_arn: asTraversal(`aws_acm_certificate_validation.validation.certificate_arn`),
-                                ssl_support_method: 'sni-only',
-                                minimum_protocol_version: minimumProtocolVersion
-                            }
-                        }
-                        if(domainNames.length > 1) {
-                            throw new Error('no certificate_domain_to_create, existing_certificate_domain or certificate_arn given with multiple domain names. The easy way to fix this is to provide a certificate_domain_to_create like \'*.domain.com\'')
-                        }
                         return {
-                            acm_certificate_arn: asTraversal(`aws_acm_certificate_validation.validation.certificate_arn`),
+                            acm_certificate_arn: domainBlock.certArn,
                             ssl_support_method: 'sni-only',
                             minimum_protocol_version: minimumProtocolVersion
                         }
@@ -318,36 +302,8 @@ function awsSveltekit(bag: Databag): Pipeline[] {
                 ])
             })
         ]
-        if(domainNames.length > 0) {
-            databags.push(
-                cloudData('aws_route53_zone', 'zone', {
-                    name: dotDomain.zone || guessAwsDnsZoneBasedOnDomainName(domainNames[0]) || throwStatement('no \'zone\' given and could not guess based on domain name'),
-                }),
-                ...domainNames.map((domainName, i) => cloudResource('aws_route53_record', `cf_distrib_domain_record_${i}`, {
-                    zone_id: asTraversal("data.aws_route53_zone.zone.zone_id"),
-                    name: domainName,
-                    type: "CNAME",
-                    ttl: 300,
-                    records: [
-                        asTraversal("aws_cloudfront_distribution.distribution.domain_name")
-                    ]
-                }))
-            )
-            if(!dotDomain.certificate_arn) {
-                if(dotDomain.existing_certificate_domain) {
-                    databags.push(
-                        cloudData('aws_acm_certificate', 'imported_certificate', {
-                            domain: dotDomain.existing_certificate_domain,
-                            types: ['AMAZON_ISSUED'],
-                            most_recent: true
-                        })
-                    )
-                } else if(dotDomain.certificate_domain_to_create) {
-                    databags.push(...acmCertificateResources(dotDomain.certificate_domain_to_create))
-                } else if(domainNames.length === 1) {
-                    databags.push(...acmCertificateResources(domainNames[0]))
-                }
-            }
+        if(domainBlock) {
+            databags.push(...domainBlock.databags)
         }
         return databags
     }

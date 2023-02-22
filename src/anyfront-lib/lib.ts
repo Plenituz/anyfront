@@ -110,6 +110,25 @@ export function guessAwsDnsZoneBasedOnDomainName(domainName: SyntaxToken | strin
     return `${parts[parts.length - 2]}.${parts[parts.length - 1]}`
 }
 
+//if null is returned it means we cant tell
+export function isDomainNameApex(domainName: SyntaxToken | string | undefined, zoneName?: SyntaxToken | string): boolean | null {
+    if(!domainName) {
+        return null
+    }
+    if(!isSimpleTemplate(domainName)) {
+        return null
+    }
+    const domainNameStr = asStr(domainName)
+    if(zoneName && isSimpleTemplate(zoneName) && domainNameStr === asStr(zoneName)) {
+        return true
+    }
+    const parts = domainNameStr.split('.')
+    if(parts.length === 2) {
+        return true
+    }
+    return false
+}
+
 export function findFilesInSubdirs(dir: string, fileName: string, ignoreDirs?: { [key:string]: unknown }): string[] {
     if(!ignoreDirs) {
         ignoreDirs = {}

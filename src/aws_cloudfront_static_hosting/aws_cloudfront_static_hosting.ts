@@ -1,10 +1,11 @@
 import { readDatabagContainer, barbeLifecycleStep, Databag, SugarCoatedDatabag, asStr, appendToTemplate, asTraversal, asBlock, asTemplate, asSyntax, asVal, SyntaxToken, ImportComponentInput, barbeOutputDir, exportDatabags, importComponents, iterateBlocks, BarbeState, DatabagContainer, asValArrayConst, applyTransformers, throwStatement } from '../../../barbe-serverless/src/barbe-std/utils';
-import { applyDefaults, applyMixins, getAwsCreds, preConfCloudResourceFactory } from '../../../barbe-serverless/src/barbe-sls-lib/lib';
+import { applyDefaults, applyMixins, getAwsCreds, preConfCloudResourceFactory, compileBlockParam } from '../../../barbe-serverless/src/barbe-sls-lib/lib';
 import lister_go from './lister.go';
 import base_script from './origin_request.template.js';
 import { DBAndImport, emptyExecutePostProcess, emptyExecuteTemplate, guessAwsDnsZoneBasedOnDomainName, prependTfStateFileName } from '../anyfront-lib/lib';
 import { AWS_CLOUDFRONT_STATIC_HOSTING, AWS_IAM_URL, AWS_LAMBDA_URL, AWS_S3_SYNC_FILES, AWS_S3_SYNC_URL, TERRAFORM_EXECUTE_URL } from '../anyfront-lib/consts';
 import { AWS_IAM_LAMBDA_ROLE, AWS_FUNCTION } from '../../../barbe-serverless/src/barbe-sls-lib/consts';
+import { awsDomainBlockResources } from '../../../barbe-serverless/src/barbe-sls-lib/helpers';
 
 const container = readDatabagContainer()
 const outputDir = barbeOutputDir()
@@ -37,7 +38,7 @@ function generateIterator1(bag: Databag): DBAndImport[] {
         id: dir
     }
     const rootObj = block.root_object || 'index.html'
-    const domainNames: SyntaxToken[] = asVal(block.domain_names || asSyntax([]))
+    const dotDomain = compileBlockParam(block, 'domain')
     const noProvider = { provider: undefined }
     const cloudResource = preConfCloudResourceFactory(block, 'resource', noProvider, bagPreconf)
     const cloudData = preConfCloudResourceFactory(block, 'data', noProvider, bagPreconf)
@@ -85,6 +86,14 @@ function generateIterator1(bag: Databag): DBAndImport[] {
     }
 
     const staticFileDistrib = () => {
+        const domainBlock = awsDomainBlockResources({
+            dotDomain,
+            domainValue: asTraversal("aws_cloudfront_distribution.distribution.domain_name"),
+            resourcePrefix: '',
+            apexHostedZoneId: asTraversal('aws_cloudfront_distribution.distribution.hosted_zone_id'),
+            cloudData,
+            cloudResource,
+        })
         let localDatabags: SugarCoatedDatabag[] = [
             cloudProvider('', 'aws', {
                 region: block.region
@@ -198,41 +207,17 @@ function generateIterator1(bag: Databag): DBAndImport[] {
                     response_page_path: appendToTemplate(asSyntax("/"), [rootObj])
                 }]),
 
-                aliases: domainNames,
+                aliases: domainBlock?.domainNames || [],
                 viewer_certificate: asBlock([
                     (() => {
                         const minimumProtocolVersion = 'TLSv1.2_2021'
-                        if(domainNames.length === 0) {
+                        if(!domainBlock) {
                             return {
                                 cloudfront_default_certificate: true
                             }
                         }
-                        if(block.certificate_arn) {
-                            return {
-                                acm_certificate_arn: block.certificate_arn,
-                                ssl_support_method: 'sni-only',
-                                minimum_protocol_version: minimumProtocolVersion
-                            }
-                        }
-                        if (block.existing_certificate_domain) {
-                            return {
-                                acm_certificate_arn: asTraversal(`data.aws_acm_certificate.imported_certificate.arn`),
-                                ssl_support_method: 'sni-only',
-                                minimum_protocol_version: minimumProtocolVersion
-                            }
-                        }
-                        if(block.certificate_domain_to_create) {
-                            return {
-                                acm_certificate_arn: asTraversal(`aws_acm_certificate_validation.validation.certificate_arn`),
-                                ssl_support_method: 'sni-only',
-                                minimum_protocol_version: minimumProtocolVersion
-                            }
-                        }
-                        if(domainNames.length > 1) {
-                            throw new Error('no certificate_domain_to_create, existing_certificate_domain or certificate_arn given with multiple domain names. The easy way to fix this is to provide a certificate_domain_to_create like \'*.domain.com\'')
-                        }
                         return {
-                            acm_certificate_arn: asTraversal(`data.aws_acm_certificate.imported_certificate.arn`),
+                            acm_certificate_arn: domainBlock.certArn,
                             ssl_support_method: 'sni-only',
                             minimum_protocol_version: minimumProtocolVersion
                         }
@@ -240,36 +225,8 @@ function generateIterator1(bag: Databag): DBAndImport[] {
                 ])
             })
         ]
-        if (domainNames.length > 0) {
-            localDatabags.push(
-                cloudData('aws_route53_zone', 'zone', {
-                    name: block.zone || guessAwsDnsZoneBasedOnDomainName(domainNames[0]) || throwStatement('no \'zone\' given and could not guess based on domain name')
-                }),
-                ...domainNames.map((domainName, i) => cloudResource('aws_route53_record', `cf_distrib_domain_record_${i}`, {
-                    zone_id: asTraversal('data.aws_route53_zone.zone.zone_id'),
-                    name: domainName,
-                    type: 'CNAME',
-                    ttl: 300,
-                    records: [
-                        asTraversal('aws_cloudfront_distribution.distribution.domain_name')
-                    ]
-                }))
-            )
-            if(!block.certificate_arn) {
-                if(block.existing_certificate_domain) {
-                    localDatabags.push(
-                        cloudData('aws_acm_certificate', 'imported_certificate', {
-                            domain: block.existing_certificate_domain,
-                            types: ['AMAZON_ISSUED'],
-                            most_recent: true
-                        })
-                    )
-                } else if(block.certificate_domain_to_create) {
-                    localDatabags.push(...acmCertificateResources(block.certificate_domain_to_create))
-                } else if(domainNames.length === 1) {
-                    localDatabags.push(...acmCertificateResources(domainNames[0]))
-                }
-            }
+        if (domainBlock) {
+            localDatabags.push(...domainBlock.databags)
         }
         return localDatabags
     }

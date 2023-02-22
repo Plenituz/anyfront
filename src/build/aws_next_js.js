@@ -688,6 +688,23 @@
     }
     return `${parts[parts.length - 2]}.${parts[parts.length - 1]}`;
   }
+  function isDomainNameApex(domainName, zoneName) {
+    if (!domainName) {
+      return null;
+    }
+    if (!isSimpleTemplate(domainName)) {
+      return null;
+    }
+    const domainNameStr = asStr(domainName);
+    if (zoneName && isSimpleTemplate(zoneName) && domainNameStr === asStr(zoneName)) {
+      return true;
+    }
+    const parts = domainNameStr.split(".");
+    if (parts.length === 2) {
+      return true;
+    }
+    return false;
+  }
 
   // ../../barbe-serverless/src/barbe-sls-lib/consts.ts
   var AWS_FUNCTION = "aws_function";
@@ -695,6 +712,143 @@
   var BARBE_SLS_VERSION2 = "v0.2.2";
   var TERRAFORM_EXECUTE_URL2 = `barbe-serverless/terraform_execute.js:${BARBE_SLS_VERSION2}`;
   var AWS_NETWORK_URL = `barbe-serverless/aws_network.js:${BARBE_SLS_VERSION2}`;
+
+  // ../../barbe-serverless/src/barbe-sls-lib/helpers.ts
+  function awsDomainBlockResources({ dotDomain, domainValue, resourcePrefix, apexHostedZoneId, cloudData, cloudResource }) {
+    const nameToken = dotDomain.name || dotDomain.names;
+    if (!nameToken) {
+      return null;
+    }
+    let domainNames = [];
+    if (nameToken.Type === "array_const") {
+      domainNames = nameToken.ArrayConst || [];
+    } else {
+      domainNames = [nameToken];
+    }
+    let certArn;
+    let certRef;
+    const acmCertificateResources = (domains) => {
+      return [
+        cloudResource("aws_acm_certificate", `${resourcePrefix}_cert`, {
+          domain_name: domains[0],
+          subject_alternative_names: domains.slice(1),
+          validation_method: "DNS"
+        }),
+        cloudResource("aws_route53_record", `${resourcePrefix}_validation_record`, {
+          for_each: {
+            Type: "for",
+            ForKeyVar: "dvo",
+            ForCollExpr: asTraversal(`aws_acm_certificate.${resourcePrefix}_cert.domain_validation_options`),
+            ForKeyExpr: asTraversal("dvo.domain_name"),
+            ForValExpr: asSyntax({
+              name: asTraversal("dvo.resource_record_name"),
+              record: asTraversal("dvo.resource_record_value"),
+              type: asTraversal("dvo.resource_record_type")
+            })
+          },
+          allow_overwrite: true,
+          name: asTraversal("each.value.name"),
+          records: [
+            asTraversal("each.value.record")
+          ],
+          ttl: 60,
+          type: asTraversal("each.value.type"),
+          zone_id: asTraversal(`data.aws_route53_zone.${resourcePrefix}_zone.zone_id`)
+        }),
+        cloudResource("aws_acm_certificate_validation", `${resourcePrefix}_validation`, {
+          certificate_arn: asTraversal(`aws_acm_certificate.${resourcePrefix}_cert.arn`),
+          validation_record_fqdns: {
+            Type: "for",
+            ForValVar: "record",
+            ForCollExpr: asTraversal(`aws_route53_record.${resourcePrefix}_validation_record`),
+            ForValExpr: asTraversal("record.fqdn")
+          }
+        })
+      ];
+    };
+    let zoneName = dotDomain.zone;
+    if (!zoneName) {
+      zoneName = domainNames.find(guessAwsDnsZoneBasedOnDomainName);
+    }
+    if (!zoneName) {
+      throwStatement("no 'zone' given and could not guess based on domain name");
+    }
+    let databags = [];
+    databags.push(
+      cloudData("aws_route53_zone", `${resourcePrefix}_zone`, {
+        name: zoneName
+      })
+    );
+    const forceAlias = asVal(dotDomain.use_alias || asSyntax(false));
+    for (let i = 0; i < domainNames.length; i++) {
+      const domain = domainNames[i];
+      const isApex = isDomainNameApex(domain, zoneName);
+      if (forceAlias || isApex) {
+        databags.push(
+          cloudResource("aws_route53_record", `${resourcePrefix}_${i}_alias_record`, {
+            zone_id: asTraversal(`data.aws_route53_zone.${resourcePrefix}_zone.zone_id`),
+            name: domain,
+            type: "A",
+            alias: asBlock([{
+              name: domainValue,
+              zone_id: apexHostedZoneId,
+              evaluate_target_health: false
+            }])
+          }),
+          //when a cloudfront distribution has ipv6 enabled we need 2 alias records, one A for ipv4 and one AAAA for ipv6
+          cloudResource("aws_route53_record", `${resourcePrefix}_${i}_alias_record_ipv6`, {
+            zone_id: asTraversal(`data.aws_route53_zone.${resourcePrefix}_zone.zone_id`),
+            name: domain,
+            type: "AAAA",
+            alias: asBlock([{
+              name: domainValue,
+              zone_id: apexHostedZoneId,
+              evaluate_target_health: false
+            }])
+          })
+        );
+      } else {
+        databags.push(
+          cloudResource("aws_route53_record", `${resourcePrefix}_${i}_domain_record`, {
+            zone_id: asTraversal(`data.aws_route53_zone.${resourcePrefix}_zone.zone_id`),
+            name: domain,
+            type: "CNAME",
+            ttl: 300,
+            records: [domainValue]
+          })
+        );
+      }
+    }
+    if (!dotDomain.certificate_arn) {
+      if (dotDomain.existing_certificate_domain) {
+        certArn = asTraversal(`data.aws_acm_certificate.${resourcePrefix}_imported_certificate.arn`);
+        databags.push(
+          cloudData("aws_acm_certificate", `${resourcePrefix}_imported_certificate`, {
+            domain: dotDomain.existing_certificate_domain,
+            types: ["AMAZON_ISSUED"],
+            most_recent: true
+          })
+        );
+      } else if (dotDomain.certificate_domain_to_create) {
+        certArn = asTraversal(`aws_acm_certificate.${resourcePrefix}_cert.arn`);
+        certRef = asTraversal(`aws_acm_certificate.${resourcePrefix}_cert`);
+        let certsToCreate = [];
+        if (dotDomain.certificate_domain_to_create.Type === "array_const") {
+          certsToCreate = dotDomain.certificate_domain_to_create.ArrayConst || [];
+        } else {
+          certsToCreate = [dotDomain.certificate_domain_to_create];
+        }
+        databags.push(...acmCertificateResources(certsToCreate));
+      } else {
+        certArn = asTraversal(`aws_acm_certificate.${resourcePrefix}_cert.arn`);
+        certRef = asTraversal(`aws_acm_certificate.${resourcePrefix}_cert`);
+        databags.push(...acmCertificateResources(domainNames));
+      }
+    } else {
+      certArn = dotDomain.certificate_arn;
+    }
+    return { certArn, certRef, databags, domainNames };
+  }
 
   // aws_next_js.ts
   var container = readDatabagContainer();
@@ -736,7 +890,6 @@
     };
     const dotDomain = compileBlockParam(block, "domain");
     const dotBuild = compileBlockParam(block, "build");
-    const domainNames = dotDomain.name ? [dotDomain.name] : [];
     const nodeJsVersion = asStr(dotBuild.nodejs_version || block.nodejs_version || "16");
     const cloudResource = preConfCloudResourceFactory(block, "resource", void 0, bagPreconf);
     const cloudData = preConfCloudResourceFactory(block, "data", void 0, bagPreconf);
@@ -855,6 +1008,14 @@
         })
       ];
     };
+    const domainBlock = awsDomainBlockResources({
+      dotDomain,
+      domainValue: asTraversal("aws_cloudfront_distribution.distribution.domain_name"),
+      resourcePrefix: "",
+      apexHostedZoneId: asTraversal("aws_cloudfront_distribution.distribution.hosted_zone_id"),
+      cloudData,
+      cloudResource
+    });
     let databags = [
       cloudProvider("", "aws", {
         region: block.region || os.getenv("AWS_REGION") || "us-east-1"
@@ -1054,41 +1215,17 @@
             response_headers_policy_id: asTraversal("aws_cloudfront_response_headers_policy.next_js_s3.id")
           }
         ]),
-        aliases: domainNames,
+        aliases: domainBlock?.domainNames || [],
         viewer_certificate: asBlock([
           (() => {
             const minimumProtocolVersion = "TLSv1.2_2021";
-            if (domainNames.length === 0) {
+            if (!domainBlock) {
               return {
                 cloudfront_default_certificate: true
               };
             }
-            if (dotDomain.certificate_arn) {
-              return {
-                acm_certificate_arn: dotDomain.certificate_arn,
-                ssl_support_method: "sni-only",
-                minimum_protocol_version: minimumProtocolVersion
-              };
-            }
-            if (dotDomain.existing_certificate_domain) {
-              return {
-                acm_certificate_arn: asTraversal(`data.aws_acm_certificate.imported_certificate.arn`),
-                ssl_support_method: "sni-only",
-                minimum_protocol_version: minimumProtocolVersion
-              };
-            }
-            if (dotDomain.certificate_domain_to_create) {
-              return {
-                acm_certificate_arn: asTraversal(`aws_acm_certificate_validation.validation.certificate_arn`),
-                ssl_support_method: "sni-only",
-                minimum_protocol_version: minimumProtocolVersion
-              };
-            }
-            if (domainNames.length > 1) {
-              throw new Error("no certificate_domain_to_create, existing_certificate_domain or certificate_arn given with multiple domain names. The easy way to fix this is to provide a certificate_domain_to_create like '*.domain.com'");
-            }
             return {
-              acm_certificate_arn: asTraversal(`aws_acm_certificate_validation.validation.certificate_arn`),
+              acm_certificate_arn: domainBlock.certArn,
               ssl_support_method: "sni-only",
               minimum_protocol_version: minimumProtocolVersion
             };
@@ -1096,36 +1233,8 @@
         ])
       })
     ];
-    if (domainNames.length > 0) {
-      databags.push(
-        cloudData("aws_route53_zone", "zone", {
-          name: dotDomain.zone || guessAwsDnsZoneBasedOnDomainName(domainNames[0]) || throwStatement("no 'zone' given and could not guess based on domain name")
-        }),
-        ...domainNames.map((domainName, i) => cloudResource("aws_route53_record", `cf_distrib_domain_record_${i}`, {
-          zone_id: asTraversal("data.aws_route53_zone.zone.zone_id"),
-          name: domainName,
-          type: "CNAME",
-          ttl: 300,
-          records: [
-            asTraversal("aws_cloudfront_distribution.distribution.domain_name")
-          ]
-        }))
-      );
-      if (!dotDomain.certificate_arn) {
-        if (dotDomain.existing_certificate_domain) {
-          databags.push(
-            cloudData("aws_acm_certificate", "imported_certificate", {
-              domain: dotDomain.existing_certificate_domain,
-              types: ["AMAZON_ISSUED"],
-              most_recent: true
-            })
-          );
-        } else if (dotDomain.certificate_domain_to_create) {
-          databags.push(...acmCertificateResources(dotDomain.certificate_domain_to_create));
-        } else if (domainNames.length === 1) {
-          databags.push(...acmCertificateResources(domainNames[0]));
-        }
-      }
+    if (domainBlock) {
+      databags.push(...domainBlock.databags);
     }
     let imports = [
       {

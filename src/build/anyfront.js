@@ -670,32 +670,24 @@
       }
       const [block, namePrefix] = applyDefaults(container, bag.Value);
       let appInfo;
+      let givenAppDir = ".";
       if (block.app_dir) {
         if (!isSimpleTemplate(block.app_dir)) {
           console.log("anyfront: app_dir not ready yet", JSON.stringify(block.app_dir));
           return null;
         }
-        const appDir = asStr(block.app_dir);
-        const appType = getDirAppType(appDir);
-        if (!appType) {
-          throw new Error(`couldnt find a supported framework in the directory '${appDir}'`);
-        }
-        appInfo = {
-          location: appDir,
-          framework: appType
-        };
-      } else {
-        const appDirs = findAppDirs(".");
-        if (appDirs.length === 0) {
-          console.log('anyfront: couldnt find a sub directory with a package.json that has a supported framework, please provide the path to it in the "app_dir" field');
-          return null;
-        }
-        if (appDirs.length > 1) {
-          console.log('anyfront: found multiple sub directories with a package.json that has a supported framework, please provide the path to the app you want deployed in the "app_dir" field');
-          return null;
-        }
-        appInfo = appDirs[0];
+        givenAppDir = asStr(block.app_dir);
       }
+      const appDirs = findAppDirs(givenAppDir);
+      if (appDirs.length === 0) {
+        console.log('anyfront: couldnt find a sub directory with a package.json that has a supported framework, please provide the path to it in the "app_dir" field');
+        return null;
+      }
+      if (appDirs.length > 1) {
+        console.log('anyfront: found multiple sub directories with a package.json that has a supported framework, please provide the path to the app you want deployed in the "app_dir" field');
+        return null;
+      }
+      appInfo = appDirs[0];
       return {
         bag,
         block,

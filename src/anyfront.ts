@@ -284,7 +284,7 @@ function dostuff() {
                 return null
             }
             if (appDirs.length > 1) {
-                console.log('anyfront: found multiple sub directories with a package.json that has a supported framework, please provide the path to the app you want deployed in the "app_dir" field')
+                console.log('anyfront: found multiple sub directories with a package.json that has a supported framework, please provide the path to the app you want deployed in the "app_dir" field: ', appDirs.map(a => a.location).join(','))
                 return null
             }
             appInfo = appDirs[0]

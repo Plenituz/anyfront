@@ -1,6 +1,4 @@
-# https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review
-#    ?templateURL=https://s3.amazonaws.com/anyfront.dev/try.cloudformation.yml
-#    &stackName=anyfront-1click-deploy
+# https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.amazonaws.com/anyfront.dev/try.cloudformation.yml&stackName=anyfront-1click-deploy
 #    &param_GitUrl=...
 #    &param_DomainName=...
 

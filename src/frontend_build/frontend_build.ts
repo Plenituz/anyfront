@@ -71,11 +71,10 @@ function frontendBuildIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] {
 
     const buildScript = applyMixins(build_script, {
         name: bag.Name,
-        build_dir: buildDir,
         build_output_dir: asStr(block.build_output_dir || ''),
         build_cmd: buildCmd,
         cmd_env: JSON.stringify(envObj),
-        ignoredDirs: JSON.stringify(ignoredDirs),
+        ignored_dirs: JSON.stringify(ignoredDirs),
     })
     
     return [{
@@ -97,10 +96,11 @@ function frontendBuildIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] {
             dockerfile: `
                 FROM node:${asStr(block.nodejs_version || '18')}${asStr(block.nodejs_version_tag || '-slim')}
 
-                COPY --from=src . /src
+                COPY --from=src ./${buildDir} /src
                 WORKDIR /src
 
                 ${Object.keys(fileOverrides).map((k) => `COPY --from=src ${k} ${k}`).join('\n')}
+                COPY --from=src __barbe_build_script.cjs __barbe_build_script.cjs
                 RUN ${installCmd}
                 RUN node __barbe_build_script.cjs`
         }

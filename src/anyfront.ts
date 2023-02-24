@@ -142,7 +142,7 @@ function sveltekitAwsPipeline(app: AppBundle): Step[] {
         step(() => ({
             imports: [{
                 url: AWS_SVELTEKIT_URL,
-                copyFromContainer: ['cr_[terraform]', 'default', 'global_default'],
+                copyFromContainer: ['cr_[terraform]', 'default', 'global_default', 'state_store'],
                 input: [{
                     Type: AWS_SVELTEKIT,
                     Name: bag.Name,
@@ -164,7 +164,7 @@ function nextAwsPipeline(app: AppBundle): Step[] {
         step(() => ({
             imports: [{
                 url: AWS_NEXT_JS_URL,
-                copyFromContainer: ['cr_[terraform]', 'default', 'global_default'],
+                copyFromContainer: ['cr_[terraform]', 'default', 'global_default', 'state_store'],
                 input: [{
                     Type: AWS_NEXT_JS,
                     Name: bag.Name,
@@ -186,7 +186,7 @@ function nextGcpPipeline(app: AppBundle): Step[] {
         step(() => ({
             imports: [{
                 url: GCP_NEXT_JS_URL,
-                copyFromContainer: ['cr_[terraform]', 'default', 'global_default'],
+                copyFromContainer: ['cr_[terraform]', 'default', 'global_default', 'state_store'],
                 input: [{
                     Type: GCP_NEXT_JS,
                     Name: bag.Name,

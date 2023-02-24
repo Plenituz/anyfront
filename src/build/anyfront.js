@@ -564,7 +564,7 @@
       step(() => ({
         imports: [{
           url: AWS_SVELTEKIT_URL,
-          copyFromContainer: ["cr_[terraform]", "default", "global_default"],
+          copyFromContainer: ["cr_[terraform]", "default", "global_default", "state_store"],
           input: [{
             Type: AWS_SVELTEKIT,
             Name: bag.Name,
@@ -585,7 +585,7 @@
       step(() => ({
         imports: [{
           url: AWS_NEXT_JS_URL,
-          copyFromContainer: ["cr_[terraform]", "default", "global_default"],
+          copyFromContainer: ["cr_[terraform]", "default", "global_default", "state_store"],
           input: [{
             Type: AWS_NEXT_JS,
             Name: bag.Name,
@@ -606,7 +606,7 @@
       step(() => ({
         imports: [{
           url: GCP_NEXT_JS_URL,
-          copyFromContainer: ["cr_[terraform]", "default", "global_default"],
+          copyFromContainer: ["cr_[terraform]", "default", "global_default", "state_store"],
           input: [{
             Type: GCP_NEXT_JS,
             Name: bag.Name,

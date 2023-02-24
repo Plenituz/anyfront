@@ -2,15 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const processName = '{{name}}'
-const givenBuildDir = '{{build_dir}}'
 const givenBuildOutputDir = '{{build_output_dir}}'
 const givenBuildCmd = '{{build_cmd}}'
-const originalWd = process.cwd();
 const givenCmdEnv = {{cmd_env}}
 const ignoredDirs = {{ignored_dirs}}
 
 function formatError(err) {
-    process.chdir(originalWd);
     const output = {
         frontend_build_output: {
             [processName]: {
@@ -18,12 +15,11 @@ function formatError(err) {
             }
         }
     }
-    fs.mkdirSync(path.join(process.cwd(), 'exported_files'), {recursive: true});
+    fs.mkdirSync('exported_files', {recursive: true});
     fs.writeFileSync('output.json', JSON.stringify(output));
 }
 
 function formatSuccess() {
-    process.chdir(originalWd);
     const output = {
         frontend_build_output: {
             [processName]: {
@@ -51,9 +47,6 @@ async function wait(t) {
 }
 
 async function main() {
-    console.log('app directory: ' + givenBuildDir);
-    process.chdir(givenBuildDir);
-
     let dirsPreBuild = fs.readdirSync('.').filter(f => fs.statSync(f).isDirectory())
     let changedFiles = {}
     if(!givenBuildOutputDir) {
@@ -117,10 +110,9 @@ async function main() {
 
     console.log('Build finished in', buildOutputDir);
     formatSuccess()
-    console.log('moving', path.join(originalWd, givenBuildDir, buildOutputDir), 'to', process.cwd() + '/exported_files')
-    const fullPathBuildOutputDir = path.join(originalWd, givenBuildDir, buildOutputDir)
+    console.log('moving', buildOutputDir, 'to', 'exported_files')
     try {
-        fs.renameSync(fullPathBuildOutputDir, 'exported_files')
+        fs.renameSync(buildOutputDir, 'exported_files')
     }catch (err){
         //this error is when you try to move a file across file systems
         //sometimes you get this because of how builkit mounts file systems
@@ -128,7 +120,7 @@ async function main() {
             throw err;
         }
         console.log('failed to rename, moving with mv')
-        execSyncWrapper(`mv ${fullPathBuildOutputDir} exported_files`)
+        execSyncWrapper(`mv ${buildOutputDir} exported_files`)
     }
     console.log('done moving')
 }

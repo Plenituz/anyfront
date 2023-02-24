@@ -944,7 +944,7 @@
   var AWS_NETWORK_URL = `barbe-serverless/aws_network.js:${BARBE_SLS_VERSION2}`;
 
   // aws_sveltekit/svelte.config.template.js
-  var svelte_config_template_default = `const customer_svelteConfig = import("./customer_svelte.config.js");
+  var svelte_config_template_default = `import customer_svelteConfig from "./customer_svelte.config.js";
 import adapter from '@yarbsemaj/adapter-lambda'
 
 if(!customer_svelteConfig.kit) customer_svelteConfig.kit = {}
@@ -1009,7 +1009,13 @@ export default customer_svelteConfig`;
     };
     let zoneName = dotDomain.zone;
     if (!zoneName) {
-      zoneName = domainNames.find(guessAwsDnsZoneBasedOnDomainName);
+      for (const domain of domainNames) {
+        const guessedZone = guessAwsDnsZoneBasedOnDomainName(domain);
+        if (guessedZone) {
+          zoneName = asSyntax(guessedZone);
+          break;
+        }
+      }
     }
     if (!zoneName) {
       throwStatement("no 'zone' given and could not guess based on domain name");

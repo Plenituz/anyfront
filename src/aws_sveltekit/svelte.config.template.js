@@ -1,4 +1,4 @@
-const customer_svelteConfig = import("./customer_svelte.config.js");
+import customer_svelteConfig from "./customer_svelte.config.js";
 import adapter from '@yarbsemaj/adapter-lambda'
 
 if(!customer_svelteConfig.kit) customer_svelteConfig.kit = {}

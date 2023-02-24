@@ -455,6 +455,7 @@
   function readDatabagContainer() {
     return JSON.parse(os.file.readFile("__barbe_input.json"));
   }
+  var IS_VERBOSE = os.getenv("BARBE_VERBOSE") === "1";
   function barbeLifecycleStep() {
     return os.getenv("BARBE_LIFECYCLE_STEP");
   }

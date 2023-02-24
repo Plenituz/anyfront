@@ -1,4 +1,4 @@
-import { barbeLifecycleStep, readDatabagContainer, statFile, barbeOutputDir, iterateBlocks, asStr, Databag, SyntaxToken, asSyntax, asVal, exportDatabags, isSimpleTemplate, throwStatement } from '../../barbe-serverless/src/barbe-std/utils';
+import { barbeLifecycleStep, readDatabagContainer, statFile, barbeOutputDir, iterateBlocks, asStr, Databag, SyntaxToken, asSyntax, asVal, exportDatabags, isSimpleTemplate, throwStatement, IS_VERBOSE } from '../../barbe-serverless/src/barbe-std/utils';
 import * as _ from '../../barbe-serverless/src/barbe-std/spidermonkey-globals';
 import { isFailure } from '../../barbe-serverless/src/barbe-std/rpc';
 import { ANYFRONT, STATIC_HOSTING, STATIC_HOSTING_URL, AWS_NEXT_JS, AWS_NEXT_JS_URL, GCP_NEXT_JS_URL, GCP_NEXT_JS, AWS_SVELTEKIT, AWS_SVELTEKIT_URL } from './anyfront-lib/consts';
@@ -271,7 +271,9 @@ function dostuff() {
         let givenAppDir = '.'
         if(block.app_dir) {
             if (!isSimpleTemplate(block.app_dir)) {
-                console.log('anyfront: app_dir not ready yet', JSON.stringify(block.app_dir))
+                if(IS_VERBOSE){
+                    console.log('anyfront: app_dir not ready yet', JSON.stringify(block.app_dir))
+                }
                 return null
             }
             givenAppDir = asStr(block.app_dir)

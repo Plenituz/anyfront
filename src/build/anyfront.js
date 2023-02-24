@@ -262,6 +262,7 @@
   function readDatabagContainer() {
     return JSON.parse(os.file.readFile("__barbe_input.json"));
   }
+  var IS_VERBOSE = os.getenv("BARBE_VERBOSE") === "1";
   function barbeLifecycleStep() {
     return os.getenv("BARBE_LIFECYCLE_STEP");
   }
@@ -403,17 +404,23 @@
         }
         if (stepMeta.lifecycleSteps && stepMeta.lifecycleSteps.length > 0) {
           if (!stepMeta.lifecycleSteps.includes(lifecycleStep)) {
-            console.log(`skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} of pipeline ${pipeline2.name} because lifecycle step is ${lifecycleStep} and step is only for ${stepMeta.lifecycleSteps.join(", ")}`);
+            if (IS_VERBOSE) {
+              console.log(`skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} of pipeline ${pipeline2.name} because lifecycle step is ${lifecycleStep} and step is only for ${stepMeta.lifecycleSteps.join(", ")}`);
+            }
             continue;
           }
         }
-        console.log(`running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} of pipeline ${pipeline2.name}`);
-        console.log(`step ${i} input:`, JSON.stringify(previousStepResult));
+        if (IS_VERBOSE) {
+          console.log(`running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} of pipeline ${pipeline2.name}`);
+          console.log(`step ${i} input:`, JSON.stringify(previousStepResult));
+        }
         let stepRequests = stepMeta.f({
           previousStepResult,
           history
         });
-        console.log(`step ${i} requests:`, JSON.stringify(stepRequests));
+        if (IS_VERBOSE) {
+          console.log(`step ${i} requests:`, JSON.stringify(stepRequests));
+        }
         if (!stepRequests) {
           continue;
         }
@@ -438,7 +445,9 @@
       if (stepDatabags.length > 0) {
         exportDatabags(stepDatabags);
       }
-      console.log(`step ${i} output:`, JSON.stringify(stepResults));
+      if (IS_VERBOSE) {
+        console.log(`step ${i} output:`, JSON.stringify(stepResults));
+      }
       history.push({
         databags: stepResults,
         stepNames
@@ -686,12 +695,13 @@
         return null;
       }
       const [block, namePrefix] = applyDefaults(container, bag.Value);
-      console.log("madeblock", JSON.stringify(bag.Value, null, 2), JSON.stringify(block, null, 2));
       let appInfo;
       let givenAppDir = ".";
       if (block.app_dir) {
         if (!isSimpleTemplate(block.app_dir)) {
-          console.log("anyfront: app_dir not ready yet", JSON.stringify(block.app_dir));
+          if (IS_VERBOSE) {
+            console.log("anyfront: app_dir not ready yet", JSON.stringify(block.app_dir));
+          }
           return null;
         }
         givenAppDir = asStr(block.app_dir);

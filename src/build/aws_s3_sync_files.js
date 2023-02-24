@@ -190,6 +190,7 @@
   function readDatabagContainer() {
     return JSON.parse(os.file.readFile("__barbe_input.json"));
   }
+  var IS_VERBOSE = os.getenv("BARBE_VERBOSE") === "1";
 
   // anyfront-lib/consts.ts
   var AWS_S3_SYNC_FILES = "aws_s3_sync_files";

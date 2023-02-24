@@ -1,4 +1,4 @@
-import { SugarCoatedDatabag, ImportComponentInput, DatabagContainer, importComponents, applyTransformers, exportDatabags, onlyRunForLifecycleSteps, barbeLifecycleStep, LifecycleStep } from '../../../barbe-serverless/src/barbe-std/utils';
+import { SugarCoatedDatabag, ImportComponentInput, DatabagContainer, importComponents, applyTransformers, exportDatabags, onlyRunForLifecycleSteps, barbeLifecycleStep, LifecycleStep, IS_VERBOSE } from '../../../barbe-serverless/src/barbe-std/utils';
 
 export function mergeDatabagContainers(...containers: DatabagContainer[]): DatabagContainer {
     let output: DatabagContainer = {}
@@ -41,19 +41,25 @@ export function executePipelineGroup(container: DatabagContainer, pipelines: Pip
             }
             if(stepMeta.lifecycleSteps && stepMeta.lifecycleSteps.length > 0) {
                 if (!stepMeta.lifecycleSteps.includes(lifecycleStep)) {
-                    console.log(`skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ''} of pipeline ${pipeline.name} because lifecycle step is ${lifecycleStep} and step is only for ${stepMeta.lifecycleSteps.join(', ')}`)
+                    if(IS_VERBOSE) {
+                        console.log(`skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ''} of pipeline ${pipeline.name} because lifecycle step is ${lifecycleStep} and step is only for ${stepMeta.lifecycleSteps.join(', ')}`)
+                    }
                     // history.push({});
                     // previousStepResult = {};
                     continue
                 }
             }
-            console.log(`running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ''} of pipeline ${pipeline.name}`)
-            console.log(`step ${i} input:`, JSON.stringify(previousStepResult))
+            if(IS_VERBOSE) {
+                console.log(`running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ''} of pipeline ${pipeline.name}`)
+                console.log(`step ${i} input:`, JSON.stringify(previousStepResult))
+            }
             let stepRequests = stepMeta.f({
                 previousStepResult,
                 history
             });
-            console.log(`step ${i} requests:`, JSON.stringify(stepRequests))
+            if(IS_VERBOSE) {
+                console.log(`step ${i} requests:`, JSON.stringify(stepRequests))
+            }
             if(!stepRequests) {
                 continue;
             }
@@ -78,7 +84,9 @@ export function executePipelineGroup(container: DatabagContainer, pipelines: Pip
         if(stepDatabags.length > 0) {
             exportDatabags(stepDatabags)
         }
-        console.log(`step ${i} output:`, JSON.stringify(stepResults))
+        if(IS_VERBOSE) {
+            console.log(`step ${i} output:`, JSON.stringify(stepResults))
+        }
         history.push({
             databags: stepResults,
             stepNames

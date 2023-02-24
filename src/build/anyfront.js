@@ -314,6 +314,7 @@
       defaults = compileDefaults(container2, "");
     }
     const blockVal = asVal(mergeTokens([defaults, block]));
+    delete blockVal.name_prefix;
     return [
       blockVal,
       compileNamePrefix(container2, block)
@@ -392,21 +393,21 @@
       let stepTransforms = [];
       let stepDatabags = [];
       let stepNames = [];
-      for (let pipeline of pipelines) {
-        if (i >= pipeline.steps.length) {
+      for (let pipeline2 of pipelines) {
+        if (i >= pipeline2.steps.length) {
           continue;
         }
-        const stepMeta = pipeline.steps[i];
+        const stepMeta = pipeline2.steps[i];
         if (stepMeta.name) {
           stepNames.push(stepMeta.name);
         }
         if (stepMeta.lifecycleSteps && stepMeta.lifecycleSteps.length > 0) {
           if (!stepMeta.lifecycleSteps.includes(lifecycleStep)) {
-            console.log(`skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} of pipeline ${pipeline.name} because lifecycle step is ${lifecycleStep} and step is only for ${stepMeta.lifecycleSteps.join(", ")}`);
+            console.log(`skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} of pipeline ${pipeline2.name} because lifecycle step is ${lifecycleStep} and step is only for ${stepMeta.lifecycleSteps.join(", ")}`);
             continue;
           }
         }
-        console.log(`running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} of pipeline ${pipeline.name}`);
+        console.log(`running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} of pipeline ${pipeline2.name}`);
         console.log(`step ${i} input:`, JSON.stringify(previousStepResult));
         let stepRequests = stepMeta.f({
           previousStepResult,
@@ -449,6 +450,21 @@
     return {
       ...params,
       f
+    };
+  }
+  function pipeline(steps, params) {
+    return {
+      ...params,
+      steps,
+      pushWithParams(params2, f) {
+        this.steps.push(step(f, params2));
+      },
+      push(f) {
+        this.steps.push(step(f));
+      },
+      merge(...steps2) {
+        this.steps.push(...steps2);
+      }
     };
   }
 
@@ -662,9 +678,7 @@
         }
         break;
     }
-    return {
-      steps
-    };
+    return pipeline(steps, { name: "anyfront" });
   }
   function dostuff() {
     const foundApps = iterateBlocks(container, ANYFRONT, (bag) => {
@@ -672,6 +686,7 @@
         return null;
       }
       const [block, namePrefix] = applyDefaults(container, bag.Value);
+      console.log("madeblock", JSON.stringify(bag.Value, null, 2), JSON.stringify(block, null, 2));
       let appInfo;
       let givenAppDir = ".";
       if (block.app_dir) {

@@ -3,7 +3,7 @@ import * as _ from '../../barbe-serverless/src/barbe-std/spidermonkey-globals';
 import { isFailure } from '../../barbe-serverless/src/barbe-std/rpc';
 import { ANYFRONT, STATIC_HOSTING, STATIC_HOSTING_URL, AWS_NEXT_JS, AWS_NEXT_JS_URL, GCP_NEXT_JS_URL, GCP_NEXT_JS, AWS_SVELTEKIT, AWS_SVELTEKIT_URL } from './anyfront-lib/consts';
 import { applyDefaults, DatabagObjVal, compileBlockParam } from '../../barbe-serverless/src/barbe-sls-lib/lib';
-import { Pipeline, executePipelineGroup, Step, step } from './anyfront-lib/pipeline';
+import { Pipeline, executePipelineGroup, Step, step, pipeline } from './anyfront-lib/pipeline';
 
 const container = readDatabagContainer()
 
@@ -248,9 +248,7 @@ function makeAppPipeline(app: AppBundle): Pipeline {
         // case 'solidstart':
         //     throw new Error(`framework '${appInfo.framework}' not supported yet`)
     }
-    return {
-        steps,
-    }
+    return pipeline(steps, { name: 'anyfront' })
 }
 
 

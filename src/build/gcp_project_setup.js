@@ -466,6 +466,7 @@
       defaults = compileDefaults(container2, "");
     }
     const blockVal = asVal(mergeTokens([defaults, block]));
+    delete blockVal.name_prefix;
     return [
       blockVal,
       compileNamePrefix(container2, block)

@@ -518,6 +518,7 @@
       defaults = compileDefaults(container2, "");
     }
     const blockVal = asVal(mergeTokens([defaults, block]));
+    delete blockVal.name_prefix;
     return [
       blockVal,
       compileNamePrefix(container2, block)
@@ -1105,6 +1106,7 @@ export default customer_svelteConfig`;
       return [];
     }
     const [block, namePrefix] = applyDefaults(container, bag.Value);
+    console.log("aws_sveltekitnameprefix", JSON.stringify(block));
     const pipe = pipeline([], { name: `aws_sveltekit.${bag.Name}` });
     const dotBuild = compileBlockParam(block, "build");
     const dotDomain = compileBlockParam(block, "domain");

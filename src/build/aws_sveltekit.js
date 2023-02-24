@@ -1243,16 +1243,16 @@ export default customer_svelteConfig`;
             max_age_seconds: 3e3
           }])
         }),
-        cloudResource("aws_cloudfront_origin_access_control", "assets_access", {
-          name: appendToTemplate(namePrefix, [`${bag.Name}-oac`]),
-          description: asTemplate([
-            "origin access control for ",
-            appendToTemplate(namePrefix, [`${bag.Name}-assets`])
-          ]),
-          origin_access_control_origin_type: "s3",
-          signing_behavior: "always",
-          signing_protocol: "sigv4"
-        }),
+        // cloudResource('aws_cloudfront_origin_access_control', 'assets_access', {
+        //     name: appendToTemplate(namePrefix, [`${bag.Name}-oac`]),
+        //     description: asTemplate([
+        //         "origin access control for ",
+        //         appendToTemplate(namePrefix, [`${bag.Name}-assets`])
+        //     ]),
+        //     origin_access_control_origin_type: 's3',
+        //     signing_behavior: 'always',
+        //     signing_protocol: 'sigv4'
+        // }),
         //bucket has to be public, until this changes: https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-event-structure.html
         //"You can't use an OAI when you change the request from a custom origin to an Amazon S3 origin."
         //and "This field does not support origin access control (OAC)."

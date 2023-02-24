@@ -256,6 +256,9 @@
       params: [fileName]
     });
   }
+  function throwStatement(message) {
+    throw new Error(message);
+  }
   function readDatabagContainer() {
     return JSON.parse(os.file.readFile("__barbe_input.json"));
   }
@@ -680,12 +683,10 @@
       }
       const appDirs = findAppDirs(givenAppDir);
       if (appDirs.length === 0) {
-        console.log('anyfront: couldnt find a sub directory with a package.json that has a supported framework, please provide the path to it in the "app_dir" field');
-        return null;
+        throwStatement('anyfront: couldnt find a sub directory with a package.json that has a supported framework, please provide the path to it in the "app_dir" field');
       }
       if (appDirs.length > 1) {
-        console.log('anyfront: found multiple sub directories with a package.json that has a supported framework, please provide the path to the app you want deployed in the "app_dir" field');
-        return null;
+        throwStatement('anyfront: found multiple sub directories with a package.json that has a supported framework, please provide the path to the app you want deployed in the "app_dir" field: ' + appDirs.map((a) => a.location).join(","));
       }
       appInfo = appDirs[0];
       return {

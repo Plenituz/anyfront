@@ -1,4 +1,4 @@
-import { barbeLifecycleStep, readDatabagContainer, statFile, barbeOutputDir, iterateBlocks, asStr, Databag, SyntaxToken, asSyntax, asVal, exportDatabags, isSimpleTemplate } from '../../barbe-serverless/src/barbe-std/utils';
+import { barbeLifecycleStep, readDatabagContainer, statFile, barbeOutputDir, iterateBlocks, asStr, Databag, SyntaxToken, asSyntax, asVal, exportDatabags, isSimpleTemplate, throwStatement } from '../../barbe-serverless/src/barbe-std/utils';
 import * as _ from '../../barbe-serverless/src/barbe-std/spidermonkey-globals';
 import { isFailure } from '../../barbe-serverless/src/barbe-std/rpc';
 import { ANYFRONT, STATIC_HOSTING, STATIC_HOSTING_URL, AWS_NEXT_JS, AWS_NEXT_JS_URL, GCP_NEXT_JS_URL, GCP_NEXT_JS, AWS_SVELTEKIT, AWS_SVELTEKIT_URL } from './anyfront-lib/consts';
@@ -279,15 +279,13 @@ function dostuff() {
             givenAppDir = asStr(block.app_dir)
         }
         const appDirs = findAppDirs(givenAppDir)
-            if (appDirs.length === 0) {
-                console.log('anyfront: couldnt find a sub directory with a package.json that has a supported framework, please provide the path to it in the "app_dir" field')
-                return null
-            }
-            if (appDirs.length > 1) {
-                console.log('anyfront: found multiple sub directories with a package.json that has a supported framework, please provide the path to the app you want deployed in the "app_dir" field: ', appDirs.map(a => a.location).join(','))
-                return null
-            }
-            appInfo = appDirs[0]
+        if (appDirs.length === 0) {
+            throwStatement('anyfront: couldnt find a sub directory with a package.json that has a supported framework, please provide the path to it in the "app_dir" field')
+        }
+        if (appDirs.length > 1) {
+            throwStatement('anyfront: found multiple sub directories with a package.json that has a supported framework, please provide the path to the app you want deployed in the "app_dir" field: ' + appDirs.map(a => a.location).join(','))
+        }
+        appInfo = appDirs[0]
         return {
             bag,
             block,

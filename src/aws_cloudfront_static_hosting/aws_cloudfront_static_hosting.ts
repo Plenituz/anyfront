@@ -46,45 +46,6 @@ function generateIterator1(bag: Databag): DBAndImport[] {
     const cloudProvider = preConfCloudResourceFactory(block, 'provider', noProvider, bagPreconf)
     const cloudTerraform = preConfCloudResourceFactory(block, 'terraform', noProvider, bagPreconf)
 
-    const acmCertificateResources = (domain: SyntaxToken): SugarCoatedDatabag[] => {
-        return [
-            cloudResource('aws_acm_certificate', 'cert', {
-                domain_name: domain,
-                validation_method: 'DNS'
-            }),
-            cloudResource('aws_route53_record', 'validation_record', {
-                for_each: {
-                    Type: 'for',
-                    ForKeyVar: "dvo",
-                    ForCollExpr: asTraversal("aws_acm_certificate.cert.domain_validation_options"),
-                    ForKeyExpr: asTraversal("dvo.domain_name"),
-                    ForValExpr: asSyntax({
-                        name: asTraversal("dvo.resource_record_name"),
-                        record: asTraversal("dvo.resource_record_value"),
-                        type: asTraversal("dvo.resource_record_type"),
-                    })
-                },
-                allow_overwrite: true,
-                name: asTraversal("each.value.name"),
-                records: [
-                    asTraversal("each.value.record")
-                ],
-                ttl: 60,
-                type: asTraversal("each.value.type"),
-                zone_id: asTraversal("data.aws_route53_zone.zone.zone_id")
-            }),
-            cloudResource('aws_acm_certificate_validation', 'validation', {
-                certificate_arn: asTraversal('aws_acm_certificate.cert.arn'),
-                validation_record_fqdns: {
-                    Type: 'for',
-                    ForValVar: "record",
-                    ForCollExpr: asTraversal("aws_route53_record.validation_record"),
-                    ForValExpr: asTraversal("record.fqdn"),
-                }
-            })
-        ]
-    }
-
     const staticFileDistrib = () => {
         const domainBlock = awsDomainBlockResources({
             dotDomain,

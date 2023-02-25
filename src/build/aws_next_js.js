@@ -396,6 +396,18 @@
       throw new Error(resp.error);
     }
   }
+  function applyTransformers(input) {
+    const resp = barbeRpcCall({
+      method: "transformContainer",
+      params: [{
+        databags: input
+      }]
+    });
+    if (isFailure(resp)) {
+      throw new Error(resp.error);
+    }
+    return resp.result;
+  }
   function importComponents(container2, components) {
     let barbeImportComponent = [];
     for (const component of components) {
@@ -578,6 +590,28 @@
         ...bagPreconf
       });
     };
+  }
+  var __awsCredsCached = void 0;
+  function getAwsCreds() {
+    if (__awsCredsCached) {
+      return __awsCredsCached;
+    }
+    const transformed = applyTransformers([{
+      Name: "state_store_credentials",
+      Type: "aws_credentials_request",
+      Value: {}
+    }]);
+    const creds = transformed.aws_credentials?.state_store_credentials[0]?.Value;
+    if (!creds) {
+      return void 0;
+    }
+    const credsObj = asVal(creds);
+    __awsCredsCached = {
+      access_key_id: asStr(credsObj.access_key_id),
+      secret_access_key: asStr(credsObj.secret_access_key),
+      session_token: asStr(credsObj.session_token)
+    };
+    return __awsCredsCached;
   }
 
   // anyfront-lib/consts.ts
@@ -898,7 +932,7 @@
     };
     const dotDomain = compileBlockParam(block, "domain");
     const dotBuild = compileBlockParam(block, "build");
-    const nodeJsVersion = asStr(dotBuild.nodejs_version || block.nodejs_version || "16");
+    const nodeJsVersion = asStr(dotBuild.nodejs_version || block.nodejs_version || "18");
     const cloudResource = preConfCloudResourceFactory(block, "resource", void 0, bagPreconf);
     const cloudData = preConfCloudResourceFactory(block, "data", void 0, bagPreconf);
     const cloudOutput = preConfCloudResourceFactory(block, "output", void 0, bagPreconf);
@@ -908,7 +942,7 @@
       const nodeJsVersionTag = asStr(dotBuild.nodejs_version_tag || block.nodejs_version_tag || "-slim");
       const appDir = asStr(dotBuild.app_dir || block.app_dir || ".");
       const installCmd = asStr(dotBuild.install_cmd || "npm install");
-      const buildCmd = asStr(dotBuild.build_cmd || "npm run build");
+      const buildCmd = asStr(dotBuild.build_cmd || "npx --yes open-next@latest build");
       return {
         Type: "buildkit_run_in_container",
         Name: `aws_next_js_${bag.Name}`,
@@ -923,13 +957,7 @@
                     FROM node:${nodeJsVersion}${nodeJsVersionTag}
 
                     RUN apt-get update
-                    RUN apt-get install -y zip git
-                    RUN git clone https://github.com/jetbridge/cdk-nextjs.git
-                    RUN cd /cdk-nextjs/assets/lambda && npm init -y && npm i serverless-http next
-
-                    RUN mkdir /esbuild
-                    RUN cd /esbuild && npm install --save-exact esbuild
-                    RUN /esbuild/node_modules/.bin/esbuild --version
+                    RUN apt-get install -y zip
 
                     COPY --from=src ${appDir} /src
                     WORKDIR /src
@@ -937,28 +965,15 @@
                     RUN ${installCmd}
                     RUN ${buildCmd}
 
-                    RUN /esbuild/node_modules/.bin/esbuild --bundle --minify --sourcemap --target=node16 --platform=node --external:next --external:serverless-http --external:aws-sdk --format=cjs --outfile=.next/standalone/nextapp/server.cjs /cdk-nextjs/assets/lambda/NextJsHandler.ts
-                    RUN mv .next/standalone/.next/ .next/standalone/nextapp/
-                    RUN mv /cdk-nextjs/assets/lambda/node_modules .next/standalone/nextapp/
-                    # RUN ln -s /cdk-nextjs/assets/lambda/node_modules .next/standalone/nextapp/node_modules
-
-                    RUN mkdir -p __barbe_next/standalone
-                    RUN mkdir -p __barbe_next/static/_next
-                    RUN mkdir -p __barbe_next/edge
-
-                    RUN cd .next/standalone && zip -ryq1 /src/__barbe_next/standalone.zip nextapp package.json
-
-                    RUN cp -r .next/static/ __barbe_next/static/_next/static/
-                    RUN cp -r public/* __barbe_next/static/
-                    # RUN cd __barbe_next/static/ && zip -ryq1 /src/__barbe_next/assets.zip ./*
-
-                    RUN /esbuild/node_modules/.bin/esbuild --bundle --minify --sourcemap --target=node16 --platform=node --external:aws-sdk --external:url --outfile=__barbe_next/edge/origin_request.js /cdk-nextjs/assets/lambda@edge/LambdaOriginRequest
-                    RUN cd __barbe_next/edge && zip -ryq1 /src/__barbe_next/edge.zip ./*
+                    RUN cd .open-next/server-function && zip -ryq1 /src/server-function.zip .
+                    RUN cd .open-next/middleware-function && zip -ryq1 /src/middleware-function.zip .
+                    RUN cd .open-next/image-optimization-function && zip -ryq1 /src/image-optimization-function.zip .
                 `,
           exported_files: {
-            "__barbe_next/edge.zip": `${dir}/edge.zip`,
-            "__barbe_next/static": `${dir}/static`,
-            "__barbe_next/standalone.zip": `${dir}/server.zip`
+            "/src/.open-next/assets": `${dir}/assets`,
+            "/src/server-function.zip": `${dir}/server-function.zip`,
+            "/src/middleware-function.zip": `${dir}/middleware-function.zip`,
+            "/src/image-optimization-function.zip": `${dir}/image-optimization-function.zip`
           }
         }
       };
@@ -966,56 +981,17 @@
     const serverBehavior = (pattern) => ({
       path_pattern: pattern,
       allowed_methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "OPTIONS", "DELETE"],
-      cached_methods: ["GET", "HEAD"],
+      cached_methods: ["GET", "HEAD", "OPTIONS"],
       viewer_protocol_policy: "redirect-to-https",
       target_origin_id: "server",
       compress: true,
-      cache_policy_id: asTraversal("data.aws_cloudfront_cache_policy.no_cache.id"),
-      origin_request_policy_id: asTraversal("data.aws_cloudfront_origin_request_policy.all_viewer.id"),
+      cache_policy_id: asTraversal("aws_cloudfront_cache_policy.next_js_default.id"),
       lambda_function_association: asBlock([{
-        event_type: "origin-request",
-        lambda_arn: asTraversal("aws_function.origin-request.qualified_arn"),
+        event_type: "viewer-request",
+        lambda_arn: asTraversal("aws_function.middleware.qualified_arn"),
         include_body: false
       }])
     });
-    const acmCertificateResources = (domain) => {
-      return [
-        cloudResource("aws_acm_certificate", "cert", {
-          domain_name: domain,
-          validation_method: "DNS"
-        }),
-        cloudResource("aws_route53_record", "validation_record", {
-          for_each: {
-            Type: "for",
-            ForKeyVar: "dvo",
-            ForCollExpr: asTraversal("aws_acm_certificate.cert.domain_validation_options"),
-            ForKeyExpr: asTraversal("dvo.domain_name"),
-            ForValExpr: asSyntax({
-              name: asTraversal("dvo.resource_record_name"),
-              record: asTraversal("dvo.resource_record_value"),
-              type: asTraversal("dvo.resource_record_type")
-            })
-          },
-          allow_overwrite: true,
-          name: asTraversal("each.value.name"),
-          records: [
-            asTraversal("each.value.record")
-          ],
-          ttl: 60,
-          type: asTraversal("each.value.type"),
-          zone_id: asTraversal("data.aws_route53_zone.zone.zone_id")
-        }),
-        cloudResource("aws_acm_certificate_validation", "validation", {
-          certificate_arn: asTraversal("aws_acm_certificate.cert.arn"),
-          validation_record_fqdns: {
-            Type: "for",
-            ForValVar: "record",
-            ForCollExpr: asTraversal("aws_route53_record.validation_record"),
-            ForValExpr: asTraversal("record.fqdn")
-          }
-        })
-      ];
-    };
     const domainBlock = awsDomainBlockResources({
       dotDomain,
       domainValue: asTraversal("aws_cloudfront_distribution.distribution.domain_name"),
@@ -1089,9 +1065,9 @@
       cloudResource("aws_cloudfront_cache_policy", "next_js_default", {
         name: appendToTemplate(namePrefix, [`${bag.Name}-default-cache-policy`]),
         default_ttl: 0,
+        min_ttl: 0,
         max_ttl: 31536e3,
         // that's 365 days
-        min_ttl: 0,
         parameters_in_cache_key_and_forwarded_to_origin: asBlock([{
           enable_accept_encoding_brotli: true,
           enable_accept_encoding_gzip: true,
@@ -1099,47 +1075,27 @@
             cookie_behavior: "all"
           }]),
           headers_config: asBlock([{
-            header_behavior: "none"
+            header_behavior: "whitelist",
+            headers: asBlock([{
+              items: [
+                "x-op-middleware-response-headers",
+                "x-middleware-prefetch",
+                "rsc",
+                "x-op-middleware-request-headers",
+                "next-router-prefetch",
+                "next-router-state-tree",
+                "x-nextjs-data",
+                "accept"
+              ]
+            }])
           }]),
           query_strings_config: asBlock([{
             query_string_behavior: "all"
           }])
         }])
       }),
-      cloudResource("aws_cloudfront_cache_policy", "next_js_s3", {
-        name: appendToTemplate(namePrefix, [`${bag.Name}-s3-cache-policy`]),
-        default_ttl: 2592e3,
-        max_ttl: 5184e3,
-        min_ttl: 2592e3,
-        parameters_in_cache_key_and_forwarded_to_origin: asBlock([{
-          enable_accept_encoding_brotli: true,
-          enable_accept_encoding_gzip: true,
-          cookies_config: asBlock([{
-            cookie_behavior: "none"
-          }]),
-          headers_config: asBlock([{
-            header_behavior: "none"
-          }]),
-          query_strings_config: asBlock([{
-            query_string_behavior: "none"
-          }])
-        }])
-      }),
-      cloudResource("aws_cloudfront_response_headers_policy", "next_js_s3", {
-        name: appendToTemplate(namePrefix, [`${bag.Name}-s3-response-headers-policy`]),
-        custom_headers_config: asBlock([{
-          items: asBlock([{
-            header: "cache-control",
-            override: false,
-            value: "public,max-age=2592000,immutable"
-          }])
-        }])
-      }),
-      cloudData("aws_cloudfront_origin_request_policy", "all_viewer", {
-        name: "Managed-AllViewer"
-      }),
-      cloudData("aws_cloudfront_cache_policy", "no_cache", {
-        name: "Managed-CachingDisabled"
+      cloudData("aws_cloudfront_cache_policy", "caching_optimized", {
+        name: "Managed-CachingOptimized"
       }),
       cloudResource("aws_cloudfront_distribution", "distribution", {
         enabled: true,
@@ -1163,7 +1119,7 @@
               "replace",
               [
                 asFuncCall("replace", [
-                  asTraversal("aws_function.origin-server.function_url"),
+                  asTraversal("aws_function.server.function_url"),
                   "https://",
                   ""
                 ]),
@@ -1177,41 +1133,65 @@
               https_port: 443,
               origin_protocol_policy: "https-only",
               origin_ssl_protocols: ["TLSv1.2"]
-            }]),
-            custom_header: asBlock([{
-              name: "x-origin-url",
-              value: asTraversal("aws_function.origin-server.function_url")
+            }])
+          },
+          {
+            domain_name: asFuncCall(
+              "replace",
+              [
+                asFuncCall("replace", [
+                  asTraversal("aws_function.image-optimization.function_url"),
+                  "https://",
+                  ""
+                ]),
+                "/",
+                ""
+              ]
+            ),
+            origin_id: "image-optimization",
+            custom_origin_config: asBlock([{
+              http_port: 80,
+              https_port: 443,
+              origin_protocol_policy: "https-only",
+              origin_ssl_protocols: ["TLSv1.2"]
             }])
           }
         ]),
         origin_group: asBlock([{
-          origin_id: "all",
+          origin_id: "server-or-assets",
           member: asBlock([
             { origin_id: "server" },
             { origin_id: "assets" }
           ]),
           failover_criteria: asBlock([{
-            status_codes: [403, 404]
+            status_codes: [404]
           }])
         }]),
         default_cache_behavior: asBlock([{
-          allowed_methods: ["GET", "HEAD", "OPTIONS"],
+          allowed_methods: ["GET", "HEAD"],
           cached_methods: ["GET", "HEAD"],
           viewer_protocol_policy: "redirect-to-https",
-          target_origin_id: "all",
+          target_origin_id: "server-or-assets",
           compress: true,
           cache_policy_id: asTraversal("aws_cloudfront_cache_policy.next_js_default.id"),
-          origin_request_policy_id: asTraversal("data.aws_cloudfront_origin_request_policy.all_viewer.id"),
           lambda_function_association: asBlock([{
-            event_type: "origin-request",
-            lambda_arn: asTraversal("aws_function.origin-request.qualified_arn"),
+            event_type: "viewer-request",
+            lambda_arn: asTraversal("aws_function.middleware.qualified_arn"),
             include_body: false
           }])
         }]),
         ordered_cache_behavior: asBlock([
-          // serverBehavior("/"),
           serverBehavior("api/*"),
           serverBehavior("_next/data/*"),
+          {
+            path_pattern: "_next/image*",
+            allowed_methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "OPTIONS", "DELETE"],
+            cached_methods: ["GET", "HEAD", "OPTIONS"],
+            viewer_protocol_policy: "redirect-to-https",
+            target_origin_id: "image-optimization",
+            compress: true,
+            cache_policy_id: asTraversal("aws_cloudfront_cache_policy.next_js_default.id")
+          },
           {
             path_pattern: "_next/*",
             allowed_methods: ["GET", "HEAD", "OPTIONS"],
@@ -1219,8 +1199,7 @@
             viewer_protocol_policy: "redirect-to-https",
             target_origin_id: "assets",
             compress: true,
-            cache_policy_id: asTraversal("aws_cloudfront_cache_policy.next_js_s3.id"),
-            response_headers_policy_id: asTraversal("aws_cloudfront_response_headers_policy.next_js_s3.id")
+            cache_policy_id: asTraversal("data.aws_cloudfront_cache_policy.caching_optimized.id")
           }
         ]),
         aliases: domainBlock?.domainNames || [],
@@ -1255,7 +1234,20 @@
             name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])],
             cloudresource_dir: dir,
             cloudresource_id: dir,
-            assumable_by: ["edgelambda.amazonaws.com", "lambda.amazonaws.com"]
+            assumable_by: ["edgelambda.amazonaws.com", "lambda.amazonaws.com"],
+            statements: [
+              {
+                Action: "s3:*",
+                Effect: "Allow",
+                Resource: [
+                  asTraversal(`aws_s3_bucket.assets.arn`),
+                  asTemplate([
+                    asTraversal(`aws_s3_bucket.assets.arn`),
+                    "*"
+                  ])
+                ]
+              }
+            ]
           }
         }]
       },
@@ -1265,33 +1257,56 @@
         input: [
           {
             Type: AWS_FUNCTION,
-            Name: "origin-request",
+            Name: "middleware",
             Value: {
               cloudresource_dir: dir,
               cloudresource_id: dir,
               //these paths are scoped to the directory in which the tf template is executed, hence no ${dir} prefix
               package: [{
-                packaged_file: "edge.zip"
+                packaged_file: "middleware-function.zip"
               }],
-              handler: "origin_request.handler",
+              handler: "index.handler",
               runtime: `nodejs${nodeJsVersion}.x`,
-              timeout: 3,
+              memory_size: 128,
+              timeout: 5,
               name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])]
             }
           },
           {
-            Type: "aws_function",
-            Name: "origin-server",
+            Type: AWS_FUNCTION,
+            Name: "server",
             Value: {
-              cloudresource_dir: "aws_next_js_" + bag.Name,
-              cloudresource_id: "aws_next_js_" + bag.Name,
+              cloudresource_dir: dir,
+              cloudresource_id: dir,
               package: [{
-                packaged_file: "server.zip"
+                packaged_file: "server-function.zip"
               }],
-              handler: "nextapp/server.handler",
+              handler: "index.handler",
               runtime: `nodejs${nodeJsVersion}.x`,
               timeout: 10,
               memory_size: 1024,
+              architecture: "arm64",
+              function_url_enabled: true,
+              name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])]
+            }
+          },
+          {
+            Type: AWS_FUNCTION,
+            Name: "image-optimization",
+            Value: {
+              cloudresource_dir: dir,
+              cloudresource_id: dir,
+              package: [{
+                packaged_file: "image-optimization-function.zip"
+              }],
+              environment: [{
+                BUCKET_NAME: asTraversal("aws_s3_bucket.assets.id")
+              }],
+              handler: "index.handler",
+              runtime: `nodejs${nodeJsVersion}.x`,
+              timeout: 25,
+              memory_size: 1536,
+              architecture: "arm64",
               function_url_enabled: true,
               name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])]
             }
@@ -1352,13 +1367,46 @@
             display_name: `Uploading Next.js files - ${bag.Name}`,
             bucket_name: bucketName,
             delete: true,
-            dir: `${outputDir}/aws_next_js_${bag.Name}/static`,
+            dir: `${outputDir}/aws_next_js_${bag.Name}/assets`,
             blob: "."
           }
         }]
       });
     }
     return [{ databags, imports }];
+  };
+  var applyIterator3 = (terraformExecuteResults) => (bag) => {
+    if (!bag.Value) {
+      return [];
+    }
+    const [block, namePrefix] = applyDefaults(container, bag.Value);
+    if (!terraformExecuteResults.terraform_execute_output?.[`aws_next_js_${bag.Name}`]) {
+      return [];
+    }
+    const outputs = asValArrayConst(terraformExecuteResults.terraform_execute_output[`aws_next_js_${bag.Name}`][0].Value);
+    const cfDistribId = asStr(outputs.find((pair) => asStr(pair.key) === "cf_distrib").value);
+    const awsCreds = getAwsCreds();
+    if (!awsCreds) {
+      throw new Error("couldn't find AWS credentials");
+    }
+    return [{
+      Type: "buildkit_run_in_container",
+      Name: `aws_cf_static_hosting_invalidate_${bag.Name}`,
+      Value: {
+        no_cache: true,
+        display_name: `Invalidate CloudFront distribution - aws_next_js.${bag.Name}`,
+        dockerfile: `
+                FROM amazon/aws-cli:latest
+
+                ENV AWS_ACCESS_KEY_ID="${awsCreds.access_key_id}"
+                ENV AWS_SECRET_ACCESS_KEY="${awsCreds.secret_access_key}"
+                ENV AWS_SESSION_TOKEN="${awsCreds.session_token}"
+                ENV AWS_REGION="${asStr(block.region || os.getenv("AWS_REGION") || "us-east-1")}"
+                ENV AWS_PAGER=""
+
+                RUN aws cloudfront create-invalidation --distribution-id ${cfDistribId} --paths "/*"`
+      }
+    }];
   };
   function apply() {
     const step0Import = {
@@ -1374,6 +1422,7 @@
     const step2Result = iterateBlocks(container, AWS_NEXT_JS, applyIterator2(terraformExecuteResults)).flat();
     exportDatabags(step2Result.map((db) => db.databags).flat());
     importComponents(container, step2Result.map((db) => db.imports).flat());
+    applyTransformers(iterateBlocks(container, AWS_NEXT_JS, applyIterator3(terraformExecuteResults)).flat());
   }
   function destroyIterator1(bag) {
     if (!bag.Value) {

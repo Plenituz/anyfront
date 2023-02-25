@@ -420,9 +420,6 @@
         Value: importComponentInput
       });
     }
-    if (barbeImportComponent.length === 0) {
-      return {};
-    }
     const resp = barbeRpcCall({
       method: "importComponents",
       params: [{
@@ -666,7 +663,7 @@
     }
     return output;
   }
-  function prependTfStateFileName(container2, prefix) {
+  function prependTfStateFileName(tfBlock, prefix) {
     const visitor = (token) => {
       if (token.Type === "literal_value" && typeof token.Value === "string" && token.Value.includes(".tfstate")) {
         return {
@@ -677,10 +674,7 @@
       }
       return null;
     };
-    if (!container2["cr_[terraform]"]) {
-      return;
-    }
-    return visitTokens(container2["cr_[terraform]"][""][0].Value, visitor);
+    return visitTokens(tfBlock, visitor);
   }
 
   // gcp_cloudrun_static_hosting/lister.go
@@ -916,7 +910,7 @@ CMD sh -c "nginx -g 'daemon off;'"`;
     };
     let databags = gcpCloudrunStaticHostingResources();
     if (container["cr_[terraform]"]) {
-      databags.push(cloudTerraform("", "", prependTfStateFileName(container, `_gcp_cr_static_hosting_${bag.Name}`)));
+      databags.push(cloudTerraform("", "", prependTfStateFileName(container["cr_[terraform]"][""][0].Value, `_gcp_cr_static_hosting_${bag.Name}`)));
     }
     return [{
       databags,
@@ -1018,7 +1012,7 @@ CMD sh -c "nginx -g 'daemon off;'"`;
     if (container["cr_[terraform]"]) {
       databags.push(
         BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-          [bag.Name]: prependTfStateFileName(container, `_gcp_cr_static_hosting_${bag.Name}`)
+          [bag.Name]: prependTfStateFileName(container["cr_[terraform]"][""][0].Value, `_gcp_cr_static_hosting_${bag.Name}`)
         })
       );
     }

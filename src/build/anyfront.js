@@ -236,9 +236,6 @@
         Value: importComponentInput
       });
     }
-    if (barbeImportComponent.length === 0) {
-      return {};
-    }
     const resp = barbeRpcCall({
       method: "importComponents",
       params: [{
@@ -405,13 +402,13 @@
         if (stepMeta.lifecycleSteps && stepMeta.lifecycleSteps.length > 0) {
           if (!stepMeta.lifecycleSteps.includes(lifecycleStep)) {
             if (IS_VERBOSE) {
-              console.log(`skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} of pipeline ${pipeline2.name} because lifecycle step is ${lifecycleStep} and step is only for ${stepMeta.lifecycleSteps.join(", ")}`);
+              console.log(`${pipeline2.name}: skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} (${lifecycleStep} not in [${stepMeta.lifecycleSteps.join(", ")}]`);
             }
             continue;
           }
         }
         if (IS_VERBOSE) {
-          console.log(`running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} of pipeline ${pipeline2.name}`);
+          console.log(`${pipeline2.name}: running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""}`);
           console.log(`step ${i} input:`, JSON.stringify(previousStepResult));
         }
         let stepRequests = stepMeta.f({
@@ -419,7 +416,7 @@
           history
         });
         if (IS_VERBOSE) {
-          console.log(`step ${i} requests:`, JSON.stringify(stepRequests));
+          console.log(`${pipeline2.name}: step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} requests:`, JSON.stringify(stepRequests));
         }
         if (!stepRequests) {
           continue;
@@ -479,6 +476,17 @@
 
   // anyfront.ts
   var container = readDatabagContainer();
+  var SupportedPlatforms = ["aws", "gcp"];
+  var SupportedFrameworks = [
+    "react-spa",
+    "next",
+    "next-export",
+    "vue-spa",
+    "solidjs-spa",
+    "solidstart",
+    "svelte-spa",
+    "sveltekit"
+  ];
   function getPackageJsonAppType(packageJson) {
     let packageJsonObj;
     try {
@@ -553,8 +561,7 @@
     }
     return results;
   }
-  function staticHostingPipeline(app) {
-    const { bag, block, appInfo } = app;
+  function staticHostingPipeline(apps) {
     return [
       step(() => ({
         imports: [{
@@ -566,112 +573,107 @@
             "state_store",
             "static_hosting_build_dir_map"
           ],
-          input: [{
+          input: apps.map((app) => ({
             Type: STATIC_HOSTING,
-            Name: bag.Name,
+            Name: app.bag.Name,
             Value: {
-              ...block,
+              ...app.block,
               build: [{
-                ...compileBlockParam(block, "build"),
-                build_dir: appInfo.location,
+                ...compileBlockParam(app.block, "build"),
+                build_dir: app.appInfo.location,
                 ...app.extraSettings
               }]
             }
-          }]
+          }))
         }]
       })),
       step(({ previousStepResult }) => exportDatabags(previousStepResult))
     ];
   }
-  function sveltekitAwsPipeline(app) {
-    const { bag, block, appInfo } = app;
+  function sveltekitAwsPipeline(apps) {
     return [
       step(() => ({
         imports: [{
           url: AWS_SVELTEKIT_URL,
           copyFromContainer: ["cr_[terraform]", "default", "global_default", "state_store"],
-          input: [{
+          input: apps.map((app) => ({
             Type: AWS_SVELTEKIT,
-            Name: bag.Name,
+            Name: app.bag.Name,
             Value: {
-              ...block,
-              app_dir: appInfo.location,
+              ...app.block,
+              app_dir: app.appInfo.location,
               ...app.extraSettings
             }
-          }]
+          }))
         }]
       })),
       step(({ previousStepResult }) => exportDatabags(previousStepResult))
     ];
   }
-  function nextAwsPipeline(app) {
-    const { bag, block, appInfo } = app;
+  function nextAwsPipeline(apps) {
     return [
       step(() => ({
         imports: [{
           url: AWS_NEXT_JS_URL,
           copyFromContainer: ["cr_[terraform]", "default", "global_default", "state_store"],
-          input: [{
+          input: apps.map((app) => ({
             Type: AWS_NEXT_JS,
-            Name: bag.Name,
+            Name: app.bag.Name,
             Value: {
-              ...block,
-              app_dir: appInfo.location,
+              ...app.block,
+              app_dir: app.appInfo.location,
               ...app.extraSettings
             }
-          }]
+          }))
         }]
       })),
       step(({ previousStepResult }) => exportDatabags(previousStepResult))
     ];
   }
-  function nextGcpPipeline(app) {
-    const { bag, block, appInfo } = app;
+  function nextGcpPipeline(apps) {
     return [
       step(() => ({
         imports: [{
           url: GCP_NEXT_JS_URL,
           copyFromContainer: ["cr_[terraform]", "default", "global_default", "state_store"],
-          input: [{
+          input: apps.map((app) => ({
             Type: GCP_NEXT_JS,
-            Name: bag.Name,
+            Name: app.bag.Name,
             Value: {
-              ...block,
-              app_dir: appInfo.location,
+              ...app.block,
+              app_dir: app.appInfo.location,
               ...app.extraSettings
             }
-          }]
+          }))
         }]
       })),
       step(({ previousStepResult }) => exportDatabags(previousStepResult))
     ];
   }
-  function makeAppPipeline(app) {
-    const { bag, block, appInfo } = app;
-    if (!block.platform) {
-      throw new Error(`'platform' is required for anyfront.${bag.Name}`);
-    }
-    const platform = asStr(block.platform);
+  function makePipeline(framework, platform, apps) {
     let steps = [];
-    switch (appInfo.framework) {
+    switch (framework) {
       case "next-export":
-        app.extraSettings = {
-          build_output_dir: "out"
-        };
+        apps.forEach((app) => {
+          app.extraSettings = {
+            build_output_dir: "out"
+          };
+          return app;
+        });
       case "react-spa":
       case "vue-spa":
       case "solidjs-spa":
       case "svelte-spa":
       default:
-        steps = staticHostingPipeline(app);
+        steps = staticHostingPipeline(apps);
         break;
       case "next":
         switch (platform) {
           case "aws":
-            steps = nextAwsPipeline(app);
+            steps = nextAwsPipeline(apps);
             break;
           case "gcp":
-            steps = nextGcpPipeline(app);
+            steps = nextGcpPipeline(apps);
             break;
           default:
             throw new Error(`next.js not supported on platform '${platform}'`);
@@ -680,16 +682,49 @@
       case "sveltekit":
         switch (platform) {
           case "aws":
-            steps = sveltekitAwsPipeline(app);
+            steps = sveltekitAwsPipeline(apps);
             break;
           default:
-            throw new Error(`sveltkit not supported on platform '${platform}' yet`);
+            throw new Error(`sveltekit not supported on platform '${platform}' yet`);
         }
         break;
     }
-    return pipeline(steps, { name: "anyfront" });
+    return pipeline(steps, { name: `anyfront-${framework}-${platform}` });
   }
-  function dostuff() {
+  function makeAppPipelines(apps) {
+    let appPerType = {};
+    for (const app of apps) {
+      if (!app.block.platform) {
+        throw new Error(`'platform' is required for 'anyfront' block`);
+      }
+      const platform = asStr(app.block.platform);
+      if (!appPerType[app.appInfo.framework]) {
+        appPerType[app.appInfo.framework] = {};
+      }
+      if (!appPerType[app.appInfo.framework][platform]) {
+        appPerType[app.appInfo.framework][platform] = [];
+      }
+      appPerType[app.appInfo.framework][platform].push(app);
+    }
+    let pipelines = [];
+    for (const [framework, platforms] of Object.entries(appPerType)) {
+      for (const [platform, apps2] of Object.entries(platforms)) {
+        pipelines.push(makePipeline(framework, platform, apps2));
+      }
+    }
+    for (const framework of SupportedFrameworks) {
+      for (const platform of SupportedPlatforms) {
+        if (!appPerType[framework] || !appPerType[framework][platform]) {
+          try {
+            pipelines.push(makePipeline(framework, platform, []));
+          } catch (e) {
+          }
+        }
+      }
+    }
+    return pipelines;
+  }
+  function main() {
     const foundApps = iterateBlocks(container, ANYFRONT, (bag) => {
       if (!bag.Value) {
         return null;
@@ -721,8 +756,7 @@
         appInfo
       };
     }).flat().filter((t) => t);
-    const pipelines = foundApps.map(makeAppPipeline);
-    executePipelineGroup(container, pipelines);
+    executePipelineGroup(container, makeAppPipelines(foundApps));
   }
-  dostuff();
+  main();
 })();

@@ -222,7 +222,7 @@ function generateIterator1(bag: Databag): DBAndImport[] {
         ...staticFileDistrib()
     ]
     if(container['cr_[terraform]']) {
-        databags.push(cloudTerraform('', '', prependTfStateFileName(container, `_aws_cf_static_hosting_${bag.Name}`)))
+        databags.push(cloudTerraform('', '', prependTfStateFileName(container['cr_[terraform]'][''][0].Value!, `_aws_cf_static_hosting_${bag.Name}`)))
     }
 
     let imports: ImportComponentInput[] = [
@@ -299,7 +299,7 @@ const applyIterator2 = (terraformExecuteResults: DatabagContainer) => (bag: Data
     if(container['cr_[terraform]']) {
         databags.push(
             BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-                [bag.Name]: prependTfStateFileName(container, `_aws_cf_static_hosting_${bag.Name}`)
+                [bag.Name]: prependTfStateFileName(container['cr_[terraform]'][''][0].Value!, `_aws_cf_static_hosting_${bag.Name}`)
             })
         )
     }

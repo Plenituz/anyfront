@@ -435,9 +435,6 @@
         Value: importComponentInput
       });
     }
-    if (barbeImportComponent.length === 0) {
-      return {};
-    }
     const resp = barbeRpcCall({
       method: "importComponents",
       params: [{
@@ -761,7 +758,7 @@ exports.handler = (event, context, callback) => {
     }
     return output;
   }
-  function prependTfStateFileName(container2, prefix) {
+  function prependTfStateFileName(tfBlock, prefix) {
     const visitor = (token) => {
       if (token.Type === "literal_value" && typeof token.Value === "string" && token.Value.includes(".tfstate")) {
         return {
@@ -772,10 +769,7 @@ exports.handler = (event, context, callback) => {
       }
       return null;
     };
-    if (!container2["cr_[terraform]"]) {
-      return;
-    }
-    return visitTokens(container2["cr_[terraform]"][""][0].Value, visitor);
+    return visitTokens(tfBlock, visitor);
   }
   function guessAwsDnsZoneBasedOnDomainName(domainName) {
     if (!domainName) {
@@ -1162,7 +1156,7 @@ exports.handler = (event, context, callback) => {
       ...staticFileDistrib()
     ];
     if (container["cr_[terraform]"]) {
-      databags.push(cloudTerraform("", "", prependTfStateFileName(container, `_aws_cf_static_hosting_${bag.Name}`)));
+      databags.push(cloudTerraform("", "", prependTfStateFileName(container["cr_[terraform]"][""][0].Value, `_aws_cf_static_hosting_${bag.Name}`)));
     }
     let imports = [
       {
@@ -1234,7 +1228,7 @@ exports.handler = (event, context, callback) => {
     if (container["cr_[terraform]"]) {
       databags.push(
         BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-          [bag.Name]: prependTfStateFileName(container, `_aws_cf_static_hosting_${bag.Name}`)
+          [bag.Name]: prependTfStateFileName(container["cr_[terraform]"][""][0].Value, `_aws_cf_static_hosting_${bag.Name}`)
         })
       );
     }

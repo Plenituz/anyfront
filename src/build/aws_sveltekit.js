@@ -442,9 +442,6 @@
         Value: importComponentInput
       });
     }
-    if (barbeImportComponent.length === 0) {
-      return {};
-    }
     const resp = barbeRpcCall({
       method: "importComponents",
       params: [{
@@ -669,13 +666,13 @@
         if (stepMeta.lifecycleSteps && stepMeta.lifecycleSteps.length > 0) {
           if (!stepMeta.lifecycleSteps.includes(lifecycleStep)) {
             if (IS_VERBOSE) {
-              console.log(`skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} of pipeline ${pipeline2.name} because lifecycle step is ${lifecycleStep} and step is only for ${stepMeta.lifecycleSteps.join(", ")}`);
+              console.log(`${pipeline2.name}: skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} (${lifecycleStep} not in [${stepMeta.lifecycleSteps.join(", ")}]`);
             }
             continue;
           }
         }
         if (IS_VERBOSE) {
-          console.log(`running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} of pipeline ${pipeline2.name}`);
+          console.log(`${pipeline2.name}: running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""}`);
           console.log(`step ${i} input:`, JSON.stringify(previousStepResult));
         }
         let stepRequests = stepMeta.f({
@@ -683,7 +680,7 @@
           history
         });
         if (IS_VERBOSE) {
-          console.log(`step ${i} requests:`, JSON.stringify(stepRequests));
+          console.log(`${pipeline2.name}: step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} requests:`, JSON.stringify(stepRequests));
         }
         if (!stepRequests) {
           continue;
@@ -750,7 +747,7 @@
   }
 
   // anyfront-lib/lib.ts
-  function prependTfStateFileName(container2, prefix) {
+  function prependTfStateFileName(tfBlock, prefix) {
     const visitor = (token) => {
       if (token.Type === "literal_value" && typeof token.Value === "string" && token.Value.includes(".tfstate")) {
         return {
@@ -761,10 +758,7 @@
       }
       return null;
     };
-    if (!container2["cr_[terraform]"]) {
-      return;
-    }
-    return visitTokens(container2["cr_[terraform]"][""][0].Value, visitor);
+    return visitTokens(tfBlock, visitor);
   }
   function guessAwsDnsZoneBasedOnDomainName(domainName) {
     if (!domainName) {
@@ -799,114 +793,112 @@
     }
     return false;
   }
-  function autoDeleteMissing(container2, blockName) {
-    const state = BarbeState.readState();
-    const STATE_KEY_NAME = "created_tfstate";
-    const emptyExecuteBagNamePrefix = `${STATE_KEY_NAME}_destroy_missing_`;
-    const makeEmptyExecuteDatabags = (container3, state2) => {
-      if (!container3["cr_[terraform]"]) {
-        return [];
-      }
-      return emptyExecuteTemplate(container3, state2);
-    };
-    const emptyExecuteTemplate = (container3, state2) => {
-      const stateObj = state2[STATE_KEY_NAME];
-      if (!stateObj) {
-        return [];
-      }
-      let output = [];
-      for (const [bagName, tfBlock] of Object.entries(stateObj)) {
-        if (!tfBlock || bagName === "Meta") {
-          continue;
-        }
-        if (container3?.[blockName]?.[bagName]) {
-          continue;
-        }
-        output.push({
-          Type: "terraform_empty_execute",
-          Name: `${emptyExecuteBagNamePrefix}${bagName}`,
-          Value: {
-            mode: "apply",
-            template_json: JSON.stringify({
-              // :)
-              terraform: (() => {
-                let tfObj = {};
-                for (const [key, value] of Object.entries(tfBlock)) {
-                  if (!value || key === "Meta") {
-                    continue;
-                  }
-                  tfObj[key] = {
-                    [value[0].Meta?.Labels[0]]: (() => {
-                      let obj = {};
-                      for (const [innerKey, innerValue] of Object.entries(value[0])) {
-                        if (!innerValue || innerKey === "Meta") {
-                          continue;
+  function autoDeleteMissingTfState(container2, bagType) {
+    return autoDeleteMissing2(container2, {
+      bagType,
+      createSavable: (bagType2, bagName) => {
+        return prependTfStateFileName(container2["cr_[terraform]"][""][0].Value, `_${bagType2}_${bagName}`);
+      },
+      deleteMissing: (bagType2, bagName, savedValue) => {
+        const imports = [{
+          url: TERRAFORM_EXECUTE_URL,
+          input: [{
+            Type: "terraform_empty_execute",
+            Name: `auto_delete_${bagType2}_${bagName}`,
+            Value: {
+              display_name: `Destroy missing ${bagType2}.${bagName}`,
+              mode: "apply",
+              template_json: JSON.stringify({
+                // :)
+                //turn the saved json objects back into a `terraform {}` block
+                terraform: (() => {
+                  let tfObj = {};
+                  for (const [key, value] of Object.entries(savedValue)) {
+                    if (!value || key === "Meta") {
+                      continue;
+                    }
+                    tfObj[key] = {
+                      [value[0].Meta?.Labels[0]]: (() => {
+                        let obj = {};
+                        for (const [innerKey, innerValue] of Object.entries(value[0])) {
+                          if (!innerValue || innerKey === "Meta") {
+                            continue;
+                          }
+                          obj[innerKey] = innerValue;
                         }
-                        obj[innerKey] = innerValue;
-                      }
-                      return obj;
-                    })()
-                  };
-                }
-                return tfObj;
-              })()
-            })
-          }
-        });
+                        return obj;
+                      })()
+                    };
+                  }
+                  return tfObj;
+                })()
+              })
+            }
+          }]
+        }];
+        return { imports };
       }
-      return output;
-    };
-    const emptyExecutePostProcess = (container3, results) => {
-      if (!results.terraform_empty_execute_output) {
-        return [];
+    });
+  }
+  function autoDeleteMissing2(container2, input) {
+    const state = BarbeState.readState();
+    const STATE_KEY_NAME = "auto_delete_missing_tracker";
+    const applyPipe = pipeline([], { name: `auto_delete_${input.bagType}` });
+    applyPipe.pushWithParams({ name: "delete_missing", lifecycleSteps: ["apply", "destroy"] }, () => {
+      if (!container2["cr_[terraform]"]) {
+        return;
       }
-      let output = [];
-      for (const prefixedName of Object.keys(results.terraform_empty_execute_output)) {
-        if (!prefixedName.startsWith(emptyExecuteBagNamePrefix)) {
+      const stateObj = state[STATE_KEY_NAME];
+      if (!stateObj) {
+        return;
+      }
+      let output = {
+        databags: [],
+        imports: [],
+        transforms: []
+      };
+      for (const [bagName, savedValue] of Object.entries(stateObj)) {
+        if (!savedValue || bagName === "Meta") {
           continue;
         }
-        const nonPrefixedName = prefixedName.replace(emptyExecuteBagNamePrefix, "");
-        if (container3?.[blockName]?.[nonPrefixedName]) {
+        if (container2?.[input.bagType]?.[bagName]) {
           continue;
         }
-        output.push(BarbeState.deleteFromObject(STATE_KEY_NAME, nonPrefixedName));
+        const deleteMissing = input.deleteMissing(input.bagType, bagName, savedValue);
+        output.databags.push(...deleteMissing.databags || []);
+        output.imports.push(...deleteMissing.imports || []);
+        output.transforms.push(...deleteMissing.transforms || []);
       }
       return output;
-    };
-    const applyPipe = pipeline([], { name: `auto_delete_${blockName}_apply` });
-    applyPipe.pushWithParams({ lifecycleSteps: ["apply"] }, () => {
-      let databags = [];
-      if (container2["cr_[terraform]"]) {
-        databags.push(
-          ...Object.keys(container2?.[blockName] || {}).map((bagName) => BarbeState.putInObject(STATE_KEY_NAME, {
-            [bagName]: prependTfStateFileName(container2, `_${blockName}_${bagName}`)
-          }))
-        );
+    });
+    applyPipe.pushWithParams({ name: "cleanup_state", lifecycleSteps: ["post_apply"] }, () => {
+      if (!container2["cr_[terraform]"]) {
+        return;
       }
-      let imports = [{
-        url: TERRAFORM_EXECUTE_URL,
-        input: makeEmptyExecuteDatabags(container2, state)
-      }];
-      return { databags, imports };
-    });
-    applyPipe.pushWithParams({ lifecycleSteps: ["apply"] }, (input) => {
-      let databags = emptyExecutePostProcess(container2, input.previousStepResult);
+      const databags = Object.keys(container2?.[input.bagType] || {}).map((bagName) => BarbeState.putInObject(STATE_KEY_NAME, {
+        [bagName]: input.createSavable(input.bagType, bagName)
+      }));
+      for (const [bagName, savedValue] of Object.entries(state[STATE_KEY_NAME] || {})) {
+        if (!savedValue || bagName === "Meta") {
+          continue;
+        }
+        if (container2?.[input.bagType]?.[bagName]) {
+          continue;
+        }
+        databags.push(BarbeState.deleteFromObject(STATE_KEY_NAME, bagName));
+      }
       return { databags };
     });
-    const destroyPipe = pipeline([], { name: `auto_delete_${blockName}_destroy` });
-    destroyPipe.pushWithParams({ lifecycleSteps: ["destroy"] }, () => {
-      let databags = Object.keys(container2?.[blockName] || {}).map((bagName) => BarbeState.deleteFromObject(STATE_KEY_NAME, bagName));
-      let imports = [{
-        url: TERRAFORM_EXECUTE_URL,
-        input: makeEmptyExecuteDatabags(container2, state)
-      }];
-      return { imports, databags };
+    applyPipe.pushWithParams({ name: "cleanup_state_destroy", lifecycleSteps: ["post_destroy"] }, () => {
+      const databags = [];
+      for (const [bagName, savedValue] of Object.entries(state[STATE_KEY_NAME] || {})) {
+        if (!savedValue || bagName === "Meta") {
+          continue;
+        }
+        databags.push(BarbeState.deleteFromObject(STATE_KEY_NAME, bagName));
+      }
     });
-    destroyPipe.pushWithParams({ lifecycleSteps: ["destroy"] }, (input) => {
-      let databags = emptyExecutePostProcess(container2, input.previousStepResult);
-      return { databags };
-    });
-    return [applyPipe, destroyPipe];
+    return applyPipe;
   }
   function autoCreateStateStore(container2, blockName, kind) {
     if (container2.state_store) {
@@ -1363,7 +1355,7 @@ export default customer_svelteConfig`;
     pipe.pushWithParams({ name: "resources", lifecycleSteps: allGenerateSteps }, () => {
       let databags = makeResources();
       if (container["cr_[terraform]"]) {
-        databags.push(cloudTerraform("", "", prependTfStateFileName(container, `_${AWS_SVELTEKIT}_${bag.Name}`)));
+        databags.push(cloudTerraform("", "", prependTfStateFileName(container["cr_[terraform]"][""][0].Value, `_${AWS_SVELTEKIT}_${bag.Name}`)));
       }
       let transforms = [];
       const imports = [
@@ -1516,7 +1508,7 @@ export default customer_svelteConfig`;
   }
   executePipelineGroup(container, [
     ...iterateBlocks(container, AWS_SVELTEKIT, awsSveltekit).flat(),
-    ...autoDeleteMissing(container, AWS_SVELTEKIT),
+    autoDeleteMissingTfState(container, AWS_SVELTEKIT),
     autoCreateStateStore(container, AWS_SVELTEKIT, "s3")
   ]);
 })();

@@ -226,7 +226,7 @@ function generateIterator(bag: Databag): DBAndImport[] {
 
     let databags: SugarCoatedDatabag[] = gcpCloudrunStaticHostingResources()
     if(container['cr_[terraform]']) {
-        databags.push(cloudTerraform('', '', prependTfStateFileName(container, `_gcp_cr_static_hosting_${bag.Name}`)))
+        databags.push(cloudTerraform('', '', prependTfStateFileName(container['cr_[terraform]'][''][0].Value!, `_gcp_cr_static_hosting_${bag.Name}`)))
     }
     return [{
         databags,
@@ -334,7 +334,7 @@ const applyIteratorStep3 = (gcpProjectSetupResults: DatabagContainer, terraformE
     if(container['cr_[terraform]']) {
         databags.push(
             BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-                [bag.Name]: prependTfStateFileName(container, `_gcp_cr_static_hosting_${bag.Name}`)
+                [bag.Name]: prependTfStateFileName(container['cr_[terraform]'][''][0].Value!, `_gcp_cr_static_hosting_${bag.Name}`)
             })
         )
     }

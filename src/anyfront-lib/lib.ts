@@ -2,18 +2,26 @@ import { asStr, BarbeState, Databag, DatabagContainer, ImportComponentInput, isS
 import * as _ from '../../../barbe-serverless/src/barbe-std/spidermonkey-globals';
 import { isFailure } from '../../../barbe-serverless/src/barbe-std/rpc';
 import { TERRAFORM_EXECUTE_URL } from './consts';
-import { Pipeline, pipeline, step } from './pipeline';
+import { Pipeline, pipeline, step, StepOutput } from './pipeline';
 import { applyDefaults, compileBlockParam } from '../../../barbe-serverless/src/barbe-sls-lib/lib';
 
+/**
+ * @deprecated: use pipeline instead
+ */
 export type DBAndImport = {
     databags: (Databag | SugarCoatedDatabag)[]
     imports: ImportComponentInput[]
 }
 
-
+/**
+ * @deprecated: use autoDeleteMissing2 pipeline instead
+ */
 export function emptyExecuteBagNamePrefix(stateKey: string) {
     return `${stateKey}_destroy_missing_`
 }
+/**
+ * @deprecated: use autoDeleteMissing2 pipeline instead
+ */
 export function emptyExecuteTemplate(container: DatabagContainer, state: any, blockType: string, stateKey: string): SugarCoatedDatabag[] {
     const stateObj = state[stateKey] || {}
     if(!stateObj) {
@@ -55,6 +63,9 @@ export function emptyExecuteTemplate(container: DatabagContainer, state: any, bl
     return output
 }
 
+/**
+ * @deprecated: use autoDeleteMissing2 pipeline instead
+ */
 export function emptyExecutePostProcess(container: DatabagContainer, results: DatabagContainer, blockType: string, stateKey: string): SugarCoatedDatabag[] {
     if(!results.terraform_empty_execute_output) {
         return []
@@ -76,7 +87,8 @@ export function emptyExecutePostProcess(container: DatabagContainer, results: Da
     return output
 }
 
-export function prependTfStateFileName(container: DatabagContainer, prefix: string): SyntaxToken | undefined {
+//TODO port the updated usage of this
+export function prependTfStateFileName(tfBlock: SyntaxToken, prefix: string): SyntaxToken {
     const visitor = (token: SyntaxToken): SyntaxToken | null => {
         if(token.Type === 'literal_value' && typeof token.Value === 'string' && token.Value.includes('.tfstate')) {
             return {
@@ -87,10 +99,7 @@ export function prependTfStateFileName(container: DatabagContainer, prefix: stri
         }
         return null
     }
-    if(!container['cr_[terraform]']) { 
-        return 
-    }
-    return visitTokens(container['cr_[terraform]'][''][0].Value!, visitor)
+    return visitTokens(tfBlock, visitor)
 }
 
 export function guessAwsDnsZoneBasedOnDomainName(domainName: SyntaxToken | string | undefined): string | null {
@@ -154,124 +163,129 @@ export function findFilesInSubdirs(dir: string, fileName: string, ignoreDirs?: {
     return found;
 }
 
-export function autoDeleteMissing(container: DatabagContainer, blockName: string): Pipeline[] {
+export function autoDeleteMissingTfState(container: DatabagContainer, bagType: string): Pipeline {
+    return autoDeleteMissing2(container, {
+        bagType,
+        createSavable: (bagType, bagName) => {
+            return prependTfStateFileName(container['cr_[terraform]'][''][0].Value!, `_${bagType}_${bagName}`)
+        },
+        deleteMissing: (bagType, bagName, savedValue) => {
+            const imports =[{
+                url: TERRAFORM_EXECUTE_URL,
+                input: [{
+                    Type: 'terraform_empty_execute',
+                    Name: `auto_delete_${bagType}_${bagName}`,
+                    Value: {
+                        display_name: `Destroy missing ${bagType}.${bagName}`,
+                        mode: 'apply',
+                        template_json: JSON.stringify({
+                            // :)
+                            //turn the saved json objects back into a `terraform {}` block
+                            terraform: (() => {
+                                let tfObj = {}
+                                for(const [key, value] of Object.entries(savedValue as { [key: string]: any })) {
+                                    if(!value || key === 'Meta') {
+                                        continue
+                                    }
+                                    tfObj[key] = {
+                                        [value[0].Meta?.Labels[0]]: (() => {
+                                            let obj = {}
+                                            for(const [innerKey, innerValue] of Object.entries(value[0])) {
+                                                if(!innerValue || innerKey === 'Meta') {
+                                                    continue
+                                                }
+                                                obj[innerKey] = innerValue
+                                            }
+                                            return obj
+                                        })()
+                                    }
+                                }
+                                return tfObj
+                            })()
+                        })
+                    }
+                }]
+            }]
+            return { imports }
+        },
+    })
+}
+
+export type AutoDeleteInput = {
+    bagType: string
+    createSavable: (bagType: string, bagName: string) => any
+    deleteMissing: (bagType: string, bagName: string, savedValue: { [key: string]: any }) => StepOutput
+}
+export function autoDeleteMissing2(container: DatabagContainer, input: AutoDeleteInput): Pipeline {
     const state = BarbeState.readState()
-    const STATE_KEY_NAME = 'created_tfstate'
-    const emptyExecuteBagNamePrefix = `${STATE_KEY_NAME}_destroy_missing_`
+    const STATE_KEY_NAME = 'auto_delete_missing_tracker'
 
-    const makeEmptyExecuteDatabags = (container: DatabagContainer, state: any): SugarCoatedDatabag[] => {
-        if(!container['cr_[terraform]']) {
-            return []
+    const applyPipe = pipeline([], { name: `auto_delete_${input.bagType}` })
+    applyPipe.pushWithParams({ name: 'delete_missing', lifecycleSteps: ['apply', 'destroy'] }, () => {
+        if(!container['cr_[terraform]']){
+            return
         }
-        //only add empty execute if we have a terraform block
-        //because this component gets called multiple times with no real input
-        //and we dont want to delete the block everytime that happens
-        return emptyExecuteTemplate(container, state)
-    }
-
-    const emptyExecuteTemplate = (container: DatabagContainer, state: any): SugarCoatedDatabag[] => {
         const stateObj = state[STATE_KEY_NAME]
         if(!stateObj) {
-            return []
+            return
         }
-        let output: SugarCoatedDatabag[] = []
-        for(const [bagName, tfBlock] of Object.entries(stateObj)) {
-            if(!tfBlock || bagName === 'Meta') {
+        let output: StepOutput = {
+            databags: [],
+            imports: [],
+            transforms: []
+        }
+        for(const [bagName, savedValue] of Object.entries(stateObj)) {
+            if(!savedValue || bagName === 'Meta') {
                 continue
             }
-            if(container?.[blockName]?.[bagName]) {
+            if(container?.[input.bagType]?.[bagName]) {
                 //if the bag is still in the container, it means it was not deleted
                 continue
             }
-            output.push({
-                Type: 'terraform_empty_execute',
-                Name: `${emptyExecuteBagNamePrefix}${bagName}`,
-                Value: {
-                    mode: 'apply',
-                    template_json: JSON.stringify({
-                        // :)
-                        terraform: (() => {
-                            let tfObj = {}
-                            for(const [key, value] of Object.entries(tfBlock as { [key: string]: any })) {
-                                if(!value || key === 'Meta') {
-                                    continue
-                                }
-                                tfObj[key] = {
-                                    [value[0].Meta?.Labels[0]]: (() => {
-                                        let obj = {}
-                                        for(const [innerKey, innerValue] of Object.entries(value[0])) {
-                                            if(!innerValue || innerKey === 'Meta') {
-                                                continue
-                                            }
-                                            obj[innerKey] = innerValue
-                                        }
-                                        return obj
-                                    })()
-                                }
-                            }
-                            return tfObj
-                        })()
-                    })
-                }
-            })
+            //if we're here it means a block was deployed previously but is no longer in the container
+            const deleteMissing = input.deleteMissing(input.bagType, bagName, savedValue)
+            output.databags!.push(...(deleteMissing.databags || []))
+            output.imports!.push(...(deleteMissing.imports || []))
+            output.transforms!.push(...(deleteMissing.transforms || []))
         }
         return output
-    }
-
-    const emptyExecutePostProcess = (container: DatabagContainer, results: DatabagContainer): SugarCoatedDatabag[] => {
-        if(!results.terraform_empty_execute_output) {
-            return []
+    })
+    //we save the current blocks in the state on post_apply so we know the deploy went thru
+    applyPipe.pushWithParams({ name: 'cleanup_state', lifecycleSteps: ['post_apply'] }, () => {
+        if(!container['cr_[terraform]']){
+            return
         }
-        let output: SugarCoatedDatabag[] = []
-        for(const prefixedName of Object.keys(results.terraform_empty_execute_output)) {
-            if(!prefixedName.startsWith(emptyExecuteBagNamePrefix)) {
+        //add the current blocks to the state
+        const databags: SugarCoatedDatabag[] = Object.keys(container?.[input.bagType] || {})
+            .map(bagName => BarbeState.putInObject(STATE_KEY_NAME, {
+                [bagName]: input.createSavable(input.bagType, bagName)
+            }))
+
+        //delete the blocks that are missing that were deleted from the state
+        for(const [bagName, savedValue] of Object.entries(state[STATE_KEY_NAME] || {})) {
+            if(!savedValue || bagName === 'Meta') {
                 continue
             }
-            //this is the bag.Name of the gcp_cloudrun_static_hosting
-            const nonPrefixedName = prefixedName.replace(emptyExecuteBagNamePrefix, '')
-            if(container?.[blockName]?.[nonPrefixedName]) {
-                //just making sure just in case something went wrong
+            if(container?.[input.bagType]?.[bagName]) {
+                //if the bag is still in the container, it means it was not deleted
                 continue
             }
-            output.push(BarbeState.deleteFromObject(STATE_KEY_NAME, nonPrefixedName))
+            //if we're here it means a block was deployed previously but is no longer in the container
+            //and we know we destroyed it successfully int he apply step
+            databags.push(BarbeState.deleteFromObject(STATE_KEY_NAME, bagName))
         }
-        return output
-    }
-    const applyPipe = pipeline([], { name: `auto_delete_${blockName}_apply` })
-    applyPipe.pushWithParams({ lifecycleSteps: ['apply'] }, () => {
-        let databags: SugarCoatedDatabag[] = []
-        if(container['cr_[terraform]']){
-            databags.push(
-                ...Object.keys(container?.[blockName] || {}).map(bagName => BarbeState.putInObject(STATE_KEY_NAME, {
-                    [bagName]: prependTfStateFileName(container, `_${blockName}_${bagName}`)
-                }))
-            )
-        }
-        let imports = [{
-            url: TERRAFORM_EXECUTE_URL,
-            input: makeEmptyExecuteDatabags(container, state)
-        }]
-        return { databags, imports }
-    })
-    applyPipe.pushWithParams({ lifecycleSteps: ['apply'] }, (input) => {
-        let databags = emptyExecutePostProcess(container, input.previousStepResult)
         return { databags }
     })
-
-    const destroyPipe = pipeline([], { name: `auto_delete_${blockName}_destroy` })
-    destroyPipe.pushWithParams({ lifecycleSteps: ['destroy'] }, () => {
-        let databags = Object.keys(container?.[blockName] || {}).map(bagName => BarbeState.deleteFromObject(STATE_KEY_NAME, bagName))
-        let imports = [{
-            url: TERRAFORM_EXECUTE_URL,
-            input: makeEmptyExecuteDatabags(container, state)
-        }]
-        return { imports, databags }
+    applyPipe.pushWithParams({ name: 'cleanup_state_destroy', lifecycleSteps: ['post_destroy'] }, () => {
+        const databags: SugarCoatedDatabag[] = []
+        for(const [bagName, savedValue] of Object.entries(state[STATE_KEY_NAME] || {})) {
+            if(!savedValue || bagName === 'Meta') {
+                continue
+            }
+            databags.push(BarbeState.deleteFromObject(STATE_KEY_NAME, bagName))
+        }
     })
-    destroyPipe.pushWithParams({ lifecycleSteps: ['destroy'] }, (input) => {
-        let databags = emptyExecutePostProcess(container, input.previousStepResult)
-        return { databags }
-    })
-    return [applyPipe, destroyPipe]
+    return applyPipe
 }
 
 export function autoCreateStateStore(container: DatabagContainer, blockName: string, kind: 's3' | 'gcs'): Pipeline {

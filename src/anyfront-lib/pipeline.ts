@@ -42,15 +42,13 @@ export function executePipelineGroup(container: DatabagContainer, pipelines: Pip
             if(stepMeta.lifecycleSteps && stepMeta.lifecycleSteps.length > 0) {
                 if (!stepMeta.lifecycleSteps.includes(lifecycleStep)) {
                     if(IS_VERBOSE) {
-                        console.log(`skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ''} of pipeline ${pipeline.name} because lifecycle step is ${lifecycleStep} and step is only for ${stepMeta.lifecycleSteps.join(', ')}`)
+                        console.log(`${pipeline.name}: skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ''} (${lifecycleStep} not in [${stepMeta.lifecycleSteps.join(', ')}]`)
                     }
-                    // history.push({});
-                    // previousStepResult = {};
                     continue
                 }
             }
             if(IS_VERBOSE) {
-                console.log(`running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ''} of pipeline ${pipeline.name}`)
+                console.log(`${pipeline.name}: running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ''}`)
                 console.log(`step ${i} input:`, JSON.stringify(previousStepResult))
             }
             let stepRequests = stepMeta.f({
@@ -58,7 +56,7 @@ export function executePipelineGroup(container: DatabagContainer, pipelines: Pip
                 history
             });
             if(IS_VERBOSE) {
-                console.log(`step ${i} requests:`, JSON.stringify(stepRequests))
+                console.log(`${pipeline.name}: step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ''} requests:`, JSON.stringify(stepRequests))
             }
             if(!stepRequests) {
                 continue;

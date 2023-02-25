@@ -264,13 +264,6 @@
       }))
     };
   }
-  function asFuncCall(funcName, args) {
-    return {
-      Type: "function_call",
-      FunctionName: funcName,
-      FunctionArgs: args.map(asSyntax)
-    };
-  }
   function asTemplate(arr) {
     return {
       Type: "template",
@@ -442,9 +435,6 @@
         Value: importComponentInput
       });
     }
-    if (barbeImportComponent.length === 0) {
-      return {};
-    }
     const resp = barbeRpcCall({
       method: "importComponents",
       params: [{
@@ -455,6 +445,12 @@
       throw new Error(resp.error);
     }
     return resp.result;
+  }
+  function statFile(fileName) {
+    return barbeRpcCall({
+      method: "statFile",
+      params: [fileName]
+    });
   }
   function throwStatement(message) {
     throw new Error(message);
@@ -486,7 +482,7 @@
       Name: key,
       Value: value
     }),
-    getObjectValue: (state2, key, valueKey) => state2 && state2[key] && state2[key][valueKey],
+    getObjectValue: (state, key, valueKey) => state && state[key] && state[key][valueKey],
     deleteFromObject: (key, valueKey) => ({
       Type: "barbe_state(delete_from_object)",
       Name: key,
@@ -632,67 +628,124 @@
   var AWS_CLOUDFRONT_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/aws_cloudfront_static_hosting.js:${ANYFRONT_VERSION}`;
   var STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/static_hosting.js:${ANYFRONT_VERSION}`;
 
-  // anyfront-lib/lib.ts
-  function emptyExecuteBagNamePrefix(stateKey) {
-    return `${stateKey}_destroy_missing_`;
-  }
-  function emptyExecuteTemplate(container2, state2, blockType, stateKey) {
-    const stateObj = state2[stateKey] || {};
-    if (!stateObj) {
-      return [];
-    }
-    let output = [];
-    for (const [bagName, tfBlock] of Object.entries(stateObj)) {
-      if (container2[blockType][bagName]) {
-        continue;
-      }
-      output.push({
-        Type: "terraform_empty_execute",
-        Name: `${emptyExecuteBagNamePrefix(stateKey)}${bagName}`,
-        Value: {
-          display_name: `Destroy missing ${blockType}.${bagName}`,
-          mode: "apply",
-          template_json: JSON.stringify({
-            terraform: (() => {
-              let tfObj = {};
-              for (const [key, value] of Object.entries(tfBlock)) {
-                tfObj[key] = {
-                  [value[0].Meta.Labels[0]]: (() => {
-                    let obj = {};
-                    for (const [innerKey, innerValue] of Object.entries(value[0])) {
-                      obj[innerKey] = innerValue;
-                    }
-                    return obj;
-                  })()
-                };
-              }
-              return tfObj;
-            })()
-          })
+  // anyfront-lib/pipeline.ts
+  function mergeDatabagContainers(...containers) {
+    let output = {};
+    for (const container2 of containers) {
+      for (const [blockType, block] of Object.entries(container2)) {
+        output[blockType] = output[blockType] || {};
+        for (const [bagName, bag] of Object.entries(block)) {
+          output[blockType][bagName] = output[blockType][bagName] || [];
+          output[blockType][bagName].push(...bag);
         }
+      }
+    }
+    return output;
+  }
+  function executePipelineGroup(container2, pipelines) {
+    const lifecycleStep = barbeLifecycleStep();
+    const maxStep = pipelines.map((p) => p.steps.length).reduce((a, b) => Math.max(a, b), 0);
+    let previousStepResult = {};
+    let history = [];
+    for (let i = 0; i < maxStep; i++) {
+      let stepResults = {};
+      let stepImports = [];
+      let stepTransforms = [];
+      let stepDatabags = [];
+      let stepNames = [];
+      for (let pipeline2 of pipelines) {
+        if (i >= pipeline2.steps.length) {
+          continue;
+        }
+        const stepMeta = pipeline2.steps[i];
+        if (stepMeta.name) {
+          stepNames.push(stepMeta.name);
+        }
+        if (stepMeta.lifecycleSteps && stepMeta.lifecycleSteps.length > 0) {
+          if (!stepMeta.lifecycleSteps.includes(lifecycleStep)) {
+            if (IS_VERBOSE) {
+              console.log(`${pipeline2.name}: skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} (${lifecycleStep} not in [${stepMeta.lifecycleSteps.join(", ")}]`);
+            }
+            continue;
+          }
+        }
+        if (IS_VERBOSE) {
+          console.log(`${pipeline2.name}: running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""}`);
+          console.log(`step ${i} input:`, JSON.stringify(previousStepResult));
+        }
+        let stepRequests = stepMeta.f({
+          previousStepResult,
+          history
+        });
+        if (IS_VERBOSE) {
+          console.log(`${pipeline2.name}: step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} requests:`, JSON.stringify(stepRequests));
+        }
+        if (!stepRequests) {
+          continue;
+        }
+        if (stepRequests.imports) {
+          stepImports.push(...stepRequests.imports);
+        }
+        if (stepRequests.transforms) {
+          stepTransforms.push(...stepRequests.transforms);
+        }
+        if (stepRequests.databags) {
+          stepDatabags.push(...stepRequests.databags);
+        }
+      }
+      if (stepImports.length > 0) {
+        const importsResults = importComponents(container2, stepImports);
+        stepResults = mergeDatabagContainers(stepResults, importsResults);
+      }
+      if (stepTransforms.length > 0) {
+        const transformResults = applyTransformers(stepTransforms);
+        stepResults = mergeDatabagContainers(stepResults, transformResults);
+      }
+      if (stepDatabags.length > 0) {
+        exportDatabags(stepDatabags);
+      }
+      if (IS_VERBOSE) {
+        console.log(`step ${i} output:`, JSON.stringify(stepResults));
+      }
+      history.push({
+        databags: stepResults,
+        stepNames
       });
+      previousStepResult = stepResults;
     }
-    return output;
   }
-  function emptyExecutePostProcess(container2, results, blockType, stateKey) {
-    if (!results.terraform_empty_execute_output) {
-      return [];
-    }
-    let output = [];
-    const prefix = emptyExecuteBagNamePrefix(stateKey);
-    for (const prefixedName of Object.keys(results.terraform_empty_execute_output)) {
-      if (!prefixedName.startsWith(prefix)) {
-        continue;
+  function getHistoryItem(history, stepName) {
+    for (const item of history) {
+      if (item.stepNames.includes(stepName)) {
+        return item;
       }
-      const nonPrefixedName = prefixedName.replace(prefix, "");
-      if (container2?.[blockType]?.[nonPrefixedName]) {
-        continue;
-      }
-      output.push(BarbeState.deleteFromObject(stateKey, nonPrefixedName));
     }
-    return output;
+    return null;
   }
-  function prependTfStateFileName(container2, prefix) {
+  function step(f, params) {
+    return {
+      ...params,
+      f
+    };
+  }
+  function pipeline(steps, params) {
+    return {
+      ...params,
+      steps,
+      pushWithParams(params2, f) {
+        this.steps.push(step(f, params2));
+      },
+      push(f) {
+        this.steps.push(step(f));
+      },
+      merge(...steps2) {
+        this.steps.push(...steps2);
+      }
+    };
+  }
+
+  // anyfront-lib/lib.ts
+  function prependTfStateFileName(tfBlock, prefix) {
     const visitor = (token) => {
       if (token.Type === "literal_value" && typeof token.Value === "string" && token.Value.includes(".tfstate")) {
         return {
@@ -703,10 +756,7 @@
       }
       return null;
     };
-    if (!container2["cr_[terraform]"]) {
-      return;
-    }
-    return visitTokens(container2["cr_[terraform]"][""][0].Value, visitor);
+    return visitTokens(tfBlock, visitor);
   }
   function guessAwsDnsZoneBasedOnDomainName(domainName) {
     if (!domainName) {
@@ -740,6 +790,150 @@
       return true;
     }
     return false;
+  }
+  function autoDeleteMissingTfState(container2, bagType) {
+    return autoDeleteMissing2(container2, {
+      bagType,
+      createSavable: (bagType2, bagName) => {
+        return prependTfStateFileName(container2["cr_[terraform]"][""][0].Value, `_${bagType2}_${bagName}`);
+      },
+      deleteMissing: (bagType2, bagName, savedValue) => {
+        const imports = [{
+          url: TERRAFORM_EXECUTE_URL,
+          input: [{
+            Type: "terraform_empty_execute",
+            Name: `auto_delete_${bagType2}_${bagName}`,
+            Value: {
+              display_name: `Destroy missing ${bagType2}.${bagName}`,
+              mode: "apply",
+              template_json: JSON.stringify({
+                // :)
+                //turn the saved json objects back into a `terraform {}` block
+                terraform: (() => {
+                  let tfObj = {};
+                  for (const [key, value] of Object.entries(savedValue)) {
+                    if (!value || key === "Meta") {
+                      continue;
+                    }
+                    tfObj[key] = {
+                      [value[0].Meta?.Labels[0]]: (() => {
+                        let obj = {};
+                        for (const [innerKey, innerValue] of Object.entries(value[0])) {
+                          if (!innerValue || innerKey === "Meta") {
+                            continue;
+                          }
+                          obj[innerKey] = innerValue;
+                        }
+                        return obj;
+                      })()
+                    };
+                  }
+                  return tfObj;
+                })()
+              })
+            }
+          }]
+        }];
+        return { imports };
+      }
+    });
+  }
+  function autoDeleteMissing2(container2, input) {
+    const state = BarbeState.readState();
+    const STATE_KEY_NAME = "auto_delete_missing_tracker";
+    const applyPipe = pipeline([], { name: `auto_delete_${input.bagType}` });
+    applyPipe.pushWithParams({ name: "delete_missing", lifecycleSteps: ["apply", "destroy"] }, () => {
+      if (!container2["cr_[terraform]"]) {
+        return;
+      }
+      const stateObj = state[STATE_KEY_NAME];
+      if (!stateObj) {
+        return;
+      }
+      let output = {
+        databags: [],
+        imports: [],
+        transforms: []
+      };
+      for (const [bagName, savedValue] of Object.entries(stateObj)) {
+        if (!savedValue || bagName === "Meta") {
+          continue;
+        }
+        if (container2?.[input.bagType]?.[bagName]) {
+          continue;
+        }
+        const deleteMissing = input.deleteMissing(input.bagType, bagName, savedValue);
+        output.databags.push(...deleteMissing.databags || []);
+        output.imports.push(...deleteMissing.imports || []);
+        output.transforms.push(...deleteMissing.transforms || []);
+      }
+      return output;
+    });
+    applyPipe.pushWithParams({ name: "cleanup_state", lifecycleSteps: ["post_apply"] }, () => {
+      if (!container2["cr_[terraform]"]) {
+        return;
+      }
+      const databags = Object.keys(container2?.[input.bagType] || {}).map((bagName) => BarbeState.putInObject(STATE_KEY_NAME, {
+        [bagName]: input.createSavable(input.bagType, bagName)
+      }));
+      for (const [bagName, savedValue] of Object.entries(state[STATE_KEY_NAME] || {})) {
+        if (!savedValue || bagName === "Meta") {
+          continue;
+        }
+        if (container2?.[input.bagType]?.[bagName]) {
+          continue;
+        }
+        databags.push(BarbeState.deleteFromObject(STATE_KEY_NAME, bagName));
+      }
+      return { databags };
+    });
+    applyPipe.pushWithParams({ name: "cleanup_state_destroy", lifecycleSteps: ["post_destroy"] }, () => {
+      const databags = [];
+      for (const [bagName, savedValue] of Object.entries(state[STATE_KEY_NAME] || {})) {
+        if (!savedValue || bagName === "Meta") {
+          continue;
+        }
+        databags.push(BarbeState.deleteFromObject(STATE_KEY_NAME, bagName));
+      }
+    });
+    return applyPipe;
+  }
+  function autoCreateStateStore(container2, blockName, kind) {
+    if (container2.state_store) {
+      return pipeline([]);
+    }
+    return pipeline([
+      step(() => {
+        const databags = iterateBlocks(container2, blockName, (bag) => {
+          const [block, namePrefix] = applyDefaults(container2, bag.Value);
+          if (!isSimpleTemplate(namePrefix)) {
+            return [];
+          }
+          let value = {
+            name_prefix: [`${bag.Name}-`]
+          };
+          switch (kind) {
+            case "s3":
+              value["s3"] = asBlock([{}]);
+              break;
+            case "gcs":
+              const dotGcpProject = compileBlockParam(block, "google_cloud_project");
+              value["gcs"] = asBlock([{
+                project_id: block.google_cloud_project_id || block.project_id || dotGcpProject.project_id
+              }]);
+              break;
+            default:
+              throwStatement(`Unknown state_store kind '${kind}'`);
+          }
+          return [{
+            Type: "state_store",
+            Name: "",
+            Value: value
+          }];
+        }).flat();
+        return { databags };
+      }, { lifecycleSteps: ["pre_generate"] })
+    ]);
   }
 
   // ../../barbe-serverless/src/barbe-sls-lib/consts.ts
@@ -895,34 +1089,10 @@
   // aws_next_js.ts
   var container = readDatabagContainer();
   var outputDir = barbeOutputDir();
-  var state = BarbeState.readState();
-  var CREATED_TF_STATE_KEY = "created_tfstate";
-  function makeEmptyExecuteDatabags(container2, state2) {
-    if (!container2["cr_[terraform]"]) {
-      return [];
-    }
-    return emptyExecuteTemplate(container2, state2, AWS_NEXT_JS, CREATED_TF_STATE_KEY);
-  }
-  function preGenerate() {
-    if (container.state_store) {
-      return;
-    }
-    const databags = iterateBlocks(container, AWS_NEXT_JS, (bag) => {
-      const [block, namePrefix] = applyDefaults(container, bag.Value);
-      return {
-        Type: "state_store",
-        Name: "",
-        Value: {
-          name_prefix: [`${bag.Name}-`],
-          s3: asBlock([{}])
-        }
-      };
-    });
-    exportDatabags(databags);
-  }
-  function generateIterator1(bag) {
+  function awsNextJs(bag) {
+    let pipe = pipeline([], { name: `aws_next_js.${bag.Name}` });
     if (!bag.Value) {
-      return [];
+      return pipe;
     }
     const [block, namePrefix] = applyDefaults(container, bag.Value);
     const dir = `aws_next_js_${bag.Name}`;
@@ -941,7 +1111,6 @@
     const nextJsBuild = () => {
       const nodeJsVersionTag = asStr(dotBuild.nodejs_version_tag || block.nodejs_version_tag || "-slim");
       const appDir = asStr(dotBuild.app_dir || block.app_dir || ".");
-      const installCmd = asStr(dotBuild.install_cmd || "npm install");
       const buildCmd = asStr(dotBuild.build_cmd || "npx --yes open-next@latest build");
       return {
         Type: "buildkit_run_in_container",
@@ -962,402 +1131,412 @@
                     COPY --from=src ${appDir} /src
                     WORKDIR /src
 
-                    RUN ${installCmd}
                     RUN ${buildCmd}
 
                     RUN cd .open-next/server-function && zip -ryq1 /src/server-function.zip .
-                    RUN cd .open-next/middleware-function && zip -ryq1 /src/middleware-function.zip .
+                    RUN cd .open-next/middleware-function && zip -ryq1 /src/middleware-function.zip . || true
+                    RUN touch middleware-function.zip
                     RUN cd .open-next/image-optimization-function && zip -ryq1 /src/image-optimization-function.zip .
                 `,
           exported_files: {
-            "/src/.open-next/assets": `${dir}/assets`,
-            "/src/server-function.zip": `${dir}/server-function.zip`,
-            "/src/middleware-function.zip": `${dir}/middleware-function.zip`,
-            "/src/image-optimization-function.zip": `${dir}/image-optimization-function.zip`
+            ".open-next/assets": `${dir}/assets`,
+            "server-function.zip": `${dir}/server-function.zip`,
+            "middleware-function.zip": `${dir}/middleware-function.zip`,
+            "image-optimization-function.zip": `${dir}/image-optimization-function.zip`
           }
         }
       };
     };
-    const serverBehavior = (pattern) => ({
-      path_pattern: pattern,
-      allowed_methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "OPTIONS", "DELETE"],
-      cached_methods: ["GET", "HEAD", "OPTIONS"],
-      viewer_protocol_policy: "redirect-to-https",
-      target_origin_id: "server",
-      compress: true,
-      cache_policy_id: asTraversal("aws_cloudfront_cache_policy.next_js_default.id"),
-      lambda_function_association: asBlock([{
-        event_type: "viewer-request",
-        lambda_arn: asTraversal("aws_function.middleware.qualified_arn"),
-        include_body: false
-      }])
-    });
-    const domainBlock = awsDomainBlockResources({
-      dotDomain,
-      domainValue: asTraversal("aws_cloudfront_distribution.distribution.domain_name"),
-      resourcePrefix: "",
-      apexHostedZoneId: asTraversal("aws_cloudfront_distribution.distribution.hosted_zone_id"),
-      cloudData,
-      cloudResource
-    });
-    let databags = [
-      cloudProvider("", "aws", {
-        region: block.region || os.getenv("AWS_REGION") || "us-east-1"
-      }),
-      cloudResource("aws_s3_bucket", "assets", {
-        bucket: appendToTemplate(namePrefix, [`${bag.Name}-assets`]),
-        force_destroy: true
-      }),
-      cloudOutput("", "assets_s3_bucket", {
-        value: asTraversal("aws_s3_bucket.assets.id")
-      }),
-      cloudResource("aws_s3_bucket_acl", "assets_acl", {
-        bucket: asTraversal("aws_s3_bucket.assets.id"),
-        acl: "private"
-      }),
-      cloudResource("aws_s3_bucket_cors_configuration", "assets_cors", {
-        bucket: asTraversal("aws_s3_bucket.assets.id"),
-        cors_rule: asBlock([{
-          allowed_headers: ["*"],
-          allowed_methods: ["GET"],
-          allowed_origins: ["*"],
-          max_age_seconds: 3e3
-        }])
-      }),
-      cloudResource("aws_cloudfront_origin_access_identity", "assets_access_id", {
-        comment: asTemplate([
-          "origin access identity for ",
-          appendToTemplate(namePrefix, [`${bag.Name}-assets`])
-        ])
-      }),
-      cloudData("aws_iam_policy_document", "assets_policy", {
-        statement: asBlock([
-          {
-            actions: ["s3:GetObject"],
-            resources: [
-              asTemplate([
-                asTraversal("aws_s3_bucket.assets.arn"),
-                "/*"
-              ])
-            ],
-            principals: asBlock([{
-              type: "AWS",
-              identifiers: [asTraversal("aws_cloudfront_origin_access_identity.assets_access_id.iam_arn")]
-            }])
-          },
-          {
-            actions: ["s3:ListBucket"],
-            resources: [asTraversal("aws_s3_bucket.assets.arn")],
-            principals: asBlock([{
-              type: "AWS",
-              identifiers: [asTraversal("aws_cloudfront_origin_access_identity.assets_access_id.iam_arn")]
-            }])
-          }
-        ])
-      }),
-      cloudResource("aws_s3_bucket_policy", "assets_policy", {
-        bucket: asTraversal("aws_s3_bucket.assets.id"),
-        policy: asTraversal("data.aws_iam_policy_document.assets_policy.json")
-      }),
-      cloudOutput("", "cf_distrib", {
-        value: asTraversal("aws_cloudfront_distribution.distribution.id")
-      }),
-      cloudResource("aws_cloudfront_cache_policy", "next_js_default", {
-        name: appendToTemplate(namePrefix, [`${bag.Name}-default-cache-policy`]),
-        default_ttl: 0,
-        min_ttl: 0,
-        max_ttl: 31536e3,
-        // that's 365 days
-        parameters_in_cache_key_and_forwarded_to_origin: asBlock([{
-          enable_accept_encoding_brotli: true,
-          enable_accept_encoding_gzip: true,
-          cookies_config: asBlock([{
-            cookie_behavior: "all"
-          }]),
-          headers_config: asBlock([{
-            header_behavior: "whitelist",
-            headers: asBlock([{
-              items: [
-                "x-op-middleware-response-headers",
-                "x-middleware-prefetch",
-                "rsc",
-                "x-op-middleware-request-headers",
-                "next-router-prefetch",
-                "next-router-state-tree",
-                "x-nextjs-data",
-                "accept"
-              ]
-            }])
-          }]),
-          query_strings_config: asBlock([{
-            query_string_behavior: "all"
+    const tfDatabags = () => {
+      let hasMiddleware = true;
+      let middlewareZipStat = statFile(`${outputDir}/${dir}/middleware-function.zip`);
+      if (isFailure(middlewareZipStat) || middlewareZipStat.result.isDir || middlewareZipStat.result.size === 0) {
+        hasMiddleware = false;
+      }
+      const serverBehavior = (pattern) => ({
+        path_pattern: pattern,
+        allowed_methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "OPTIONS", "DELETE"],
+        cached_methods: ["GET", "HEAD", "OPTIONS"],
+        viewer_protocol_policy: "redirect-to-https",
+        target_origin_id: "server",
+        compress: true,
+        cache_policy_id: asTraversal("aws_cloudfront_cache_policy.next_js_default.id"),
+        lambda_function_association: hasMiddleware ? asBlock([{
+          event_type: "viewer-request",
+          lambda_arn: asTraversal("aws_function.middleware.qualified_arn"),
+          include_body: false
+        }]) : null
+      });
+      const domainBlock = awsDomainBlockResources({
+        dotDomain,
+        domainValue: asTraversal("aws_cloudfront_distribution.distribution.domain_name"),
+        resourcePrefix: "",
+        apexHostedZoneId: asTraversal("aws_cloudfront_distribution.distribution.hosted_zone_id"),
+        cloudData,
+        cloudResource
+      });
+      let databags = [
+        cloudProvider("", "aws", {
+          region: block.region || os.getenv("AWS_REGION") || "us-east-1"
+        }),
+        cloudResource("aws_s3_bucket", "assets", {
+          bucket: appendToTemplate(namePrefix, [`${bag.Name}-assets`]),
+          force_destroy: true
+        }),
+        cloudOutput("", "assets_s3_bucket", {
+          value: asTraversal("aws_s3_bucket.assets.id")
+        }),
+        cloudResource("aws_s3_bucket_acl", "assets_acl", {
+          bucket: asTraversal("aws_s3_bucket.assets.id"),
+          acl: "private"
+        }),
+        cloudResource("aws_s3_bucket_cors_configuration", "assets_cors", {
+          bucket: asTraversal("aws_s3_bucket.assets.id"),
+          cors_rule: asBlock([{
+            allowed_headers: ["*"],
+            allowed_methods: ["GET"],
+            allowed_origins: ["*"],
+            max_age_seconds: 3e3
           }])
-        }])
-      }),
-      cloudData("aws_cloudfront_cache_policy", "caching_optimized", {
-        name: "Managed-CachingOptimized"
-      }),
-      cloudResource("aws_cloudfront_distribution", "distribution", {
-        enabled: true,
-        is_ipv6_enabled: true,
-        price_class: "PriceClass_All",
-        restrictions: asBlock([{
-          geo_restriction: asBlock([{
-            restriction_type: "none"
-          }])
-        }]),
-        origin: asBlock([
-          {
-            domain_name: asTraversal("aws_s3_bucket.assets.bucket_regional_domain_name"),
-            origin_id: "assets",
-            s3_origin_config: asBlock([{
-              origin_access_identity: asTraversal("aws_cloudfront_origin_access_identity.assets_access_id.cloudfront_access_identity_path")
-            }])
-          },
-          {
-            domain_name: asFuncCall(
-              "replace",
-              [
-                asFuncCall("replace", [
-                  asTraversal("aws_function.server.function_url"),
-                  "https://",
-                  ""
-                ]),
-                "/",
-                ""
-              ]
-            ),
-            origin_id: "server",
-            custom_origin_config: asBlock([{
-              http_port: 80,
-              https_port: 443,
-              origin_protocol_policy: "https-only",
-              origin_ssl_protocols: ["TLSv1.2"]
-            }])
-          },
-          {
-            domain_name: asFuncCall(
-              "replace",
-              [
-                asFuncCall("replace", [
-                  asTraversal("aws_function.image-optimization.function_url"),
-                  "https://",
-                  ""
-                ]),
-                "/",
-                ""
-              ]
-            ),
-            origin_id: "image-optimization",
-            custom_origin_config: asBlock([{
-              http_port: 80,
-              https_port: 443,
-              origin_protocol_policy: "https-only",
-              origin_ssl_protocols: ["TLSv1.2"]
-            }])
-          }
-        ]),
-        origin_group: asBlock([{
-          origin_id: "server-or-assets",
-          member: asBlock([
-            { origin_id: "server" },
-            { origin_id: "assets" }
-          ]),
-          failover_criteria: asBlock([{
-            status_codes: [404]
-          }])
-        }]),
-        default_cache_behavior: asBlock([{
-          allowed_methods: ["GET", "HEAD"],
-          cached_methods: ["GET", "HEAD"],
-          viewer_protocol_policy: "redirect-to-https",
-          target_origin_id: "server-or-assets",
-          compress: true,
-          cache_policy_id: asTraversal("aws_cloudfront_cache_policy.next_js_default.id"),
-          lambda_function_association: asBlock([{
-            event_type: "viewer-request",
-            lambda_arn: asTraversal("aws_function.middleware.qualified_arn"),
-            include_body: false
-          }])
-        }]),
-        ordered_cache_behavior: asBlock([
-          serverBehavior("api/*"),
-          serverBehavior("_next/data/*"),
-          {
-            path_pattern: "_next/image*",
-            allowed_methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "OPTIONS", "DELETE"],
-            cached_methods: ["GET", "HEAD", "OPTIONS"],
-            viewer_protocol_policy: "redirect-to-https",
-            target_origin_id: "image-optimization",
-            compress: true,
-            cache_policy_id: asTraversal("aws_cloudfront_cache_policy.next_js_default.id")
-          },
-          {
-            path_pattern: "_next/*",
-            allowed_methods: ["GET", "HEAD", "OPTIONS"],
-            cached_methods: ["GET", "HEAD", "OPTIONS"],
-            viewer_protocol_policy: "redirect-to-https",
-            target_origin_id: "assets",
-            compress: true,
-            cache_policy_id: asTraversal("data.aws_cloudfront_cache_policy.caching_optimized.id")
-          }
-        ]),
-        aliases: domainBlock?.domainNames || [],
-        viewer_certificate: asBlock([
-          (() => {
-            const minimumProtocolVersion = "TLSv1.2_2021";
-            if (!domainBlock) {
-              return {
-                cloudfront_default_certificate: true
-              };
+        }),
+        cloudResource("aws_cloudfront_origin_access_identity", "assets_access_id", {
+          comment: asTemplate([
+            "origin access identity for ",
+            appendToTemplate(namePrefix, [`${bag.Name}-assets`])
+          ])
+        }),
+        cloudData("aws_iam_policy_document", "assets_policy", {
+          statement: asBlock([
+            {
+              actions: ["s3:GetObject"],
+              resources: [
+                asTemplate([
+                  asTraversal("aws_s3_bucket.assets.arn"),
+                  "/*"
+                ])
+              ],
+              principals: asBlock([{
+                type: "AWS",
+                identifiers: [asTraversal("aws_cloudfront_origin_access_identity.assets_access_id.iam_arn")]
+              }])
+            },
+            {
+              actions: ["s3:ListBucket"],
+              resources: [asTraversal("aws_s3_bucket.assets.arn")],
+              principals: asBlock([{
+                type: "AWS",
+                identifiers: [asTraversal("aws_cloudfront_origin_access_identity.assets_access_id.iam_arn")]
+              }])
             }
-            return {
-              acm_certificate_arn: domainBlock.certArn,
-              ssl_support_method: "sni-only",
-              minimum_protocol_version: minimumProtocolVersion
-            };
-          })()
-        ])
-      })
-    ];
-    if (domainBlock) {
-      databags.push(...domainBlock.databags);
-    }
-    let imports = [
-      {
-        name: `aws_next_js_aws_iam_lambda_role_${bag.Name}`,
-        url: AWS_IAM_URL,
-        input: [{
-          Type: AWS_IAM_LAMBDA_ROLE,
-          Name: "default",
-          Value: {
-            name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])],
-            cloudresource_dir: dir,
-            cloudresource_id: dir,
-            assumable_by: ["edgelambda.amazonaws.com", "lambda.amazonaws.com"],
-            statements: [
-              {
-                Action: "s3:*",
-                Effect: "Allow",
-                Resource: [
-                  asTraversal(`aws_s3_bucket.assets.arn`),
-                  asTemplate([
-                    asTraversal(`aws_s3_bucket.assets.arn`),
-                    "*"
-                  ])
+          ])
+        }),
+        cloudResource("aws_s3_bucket_policy", "assets_policy", {
+          bucket: asTraversal("aws_s3_bucket.assets.id"),
+          policy: asTraversal("data.aws_iam_policy_document.assets_policy.json")
+        }),
+        cloudOutput("", "cf_distrib", {
+          //TODO tmp
+          value: "ETKQNEEXPHH5T"
+          //asTraversal('aws_cloudfront_distribution.distribution.id'),
+        }),
+        cloudResource("aws_cloudfront_cache_policy", "next_js_default", {
+          name: appendToTemplate(namePrefix, [`${bag.Name}-default-cache-policy`]),
+          default_ttl: 0,
+          min_ttl: 0,
+          max_ttl: 31536e3,
+          // that's 365 days
+          parameters_in_cache_key_and_forwarded_to_origin: asBlock([{
+            enable_accept_encoding_brotli: true,
+            enable_accept_encoding_gzip: true,
+            cookies_config: asBlock([{
+              cookie_behavior: "all"
+            }]),
+            headers_config: asBlock([{
+              header_behavior: "whitelist",
+              headers: asBlock([{
+                items: [
+                  "x-op-middleware-response-headers",
+                  "x-middleware-prefetch",
+                  "rsc",
+                  "x-op-middleware-request-headers",
+                  "next-router-prefetch",
+                  "next-router-state-tree",
+                  "x-nextjs-data",
+                  "accept"
                 ]
+              }])
+            }]),
+            query_strings_config: asBlock([{
+              query_string_behavior: "all"
+            }])
+          }])
+        }),
+        cloudData("aws_cloudfront_cache_policy", "caching_optimized", {
+          name: "Managed-CachingOptimized"
+        })
+        //TODO tmp
+        // cloudResource('aws_cloudfront_distribution', 'distribution', {
+        //     enabled: true,
+        //     is_ipv6_enabled: true,
+        //     price_class: "PriceClass_All",
+        //     restrictions: asBlock([{
+        //         geo_restriction: asBlock([{
+        //             restriction_type: "none"
+        //         }])
+        //     }]),
+        //     origin: asBlock([
+        //         {
+        //             domain_name: asTraversal("aws_s3_bucket.assets.bucket_regional_domain_name"),
+        //             origin_id: "assets",
+        //             s3_origin_config: asBlock([{
+        //                 origin_access_identity: asTraversal("aws_cloudfront_origin_access_identity.assets_access_id.cloudfront_access_identity_path")
+        //             }])
+        //         },
+        //         {
+        //             domain_name: asFuncCall(
+        //                 "replace", 
+        //                 [
+        //                     asFuncCall( "replace", [
+        //                         asTraversal("aws_function.server.function_url"),
+        //                         "https://",
+        //                         ""
+        //                     ]),
+        //                     "/",
+        //                     ""
+        //                 ]
+        //             ),
+        //             origin_id: "server",
+        //             custom_origin_config: asBlock([{
+        //                 http_port: 80,
+        //                 https_port: 443,
+        //                 origin_protocol_policy: "https-only",
+        //                 origin_ssl_protocols: ["TLSv1.2"]
+        //             }]),
+        //         },
+        //         {
+        //             domain_name: asFuncCall(
+        //                 "replace", 
+        //                 [
+        //                     asFuncCall( "replace", [
+        //                         asTraversal("aws_function.image-optimization.function_url"),
+        //                         "https://",
+        //                         ""
+        //                     ]),
+        //                     "/",
+        //                     ""
+        //                 ]
+        //             ),
+        //             origin_id: "image-optimization",
+        //             custom_origin_config: asBlock([{
+        //                 http_port: 80,
+        //                 https_port: 443,
+        //                 origin_protocol_policy: "https-only",
+        //                 origin_ssl_protocols: ["TLSv1.2"]
+        //             }]),
+        //         }
+        //     ]),
+        //     origin_group: asBlock([{
+        //         origin_id: "server-or-assets",
+        //         member: asBlock([
+        //             { origin_id: "server" },
+        //             { origin_id: "assets" }
+        //         ]),
+        //         failover_criteria: asBlock([{
+        //             status_codes: [404]
+        //         }])
+        //     }]),
+        //     default_cache_behavior: asBlock([{
+        //         allowed_methods: ["GET", "HEAD"],
+        //         cached_methods: ["GET", "HEAD"],
+        //         viewer_protocol_policy: "redirect-to-https",
+        //         target_origin_id: "server-or-assets",
+        //         compress: true,
+        //         cache_policy_id: asTraversal("aws_cloudfront_cache_policy.next_js_default.id"),
+        //         lambda_function_association: hasMiddleware ? asBlock([{
+        //             event_type: "viewer-request",
+        //             lambda_arn: asTraversal("aws_function.middleware.qualified_arn"),
+        //             include_body: false
+        //         }]) : null,
+        //     }]),
+        //     ordered_cache_behavior: asBlock([
+        //         serverBehavior("api/*"),
+        //         serverBehavior("_next/data/*"),
+        //         {
+        //             path_pattern: "_next/image*",
+        //             allowed_methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "OPTIONS", "DELETE"],
+        //             cached_methods: ["GET", "HEAD", "OPTIONS"],
+        //             viewer_protocol_policy: "redirect-to-https",
+        //             target_origin_id: "image-optimization",
+        //             compress: true,
+        //             cache_policy_id: asTraversal("aws_cloudfront_cache_policy.next_js_default.id"),
+        //         },
+        //         {
+        //             path_pattern: "_next/*",
+        //             allowed_methods: ["GET", "HEAD", "OPTIONS"],
+        //             cached_methods: ["GET", "HEAD", "OPTIONS"],
+        //             viewer_protocol_policy: "redirect-to-https",
+        //             target_origin_id: "assets",
+        //             compress: true,
+        //             cache_policy_id: asTraversal("data.aws_cloudfront_cache_policy.caching_optimized.id"),
+        //         }
+        //     ]),
+        //     aliases: domainBlock?.domainNames || [],
+        //     viewer_certificate: asBlock([
+        //         (() => {
+        //             const minimumProtocolVersion = 'TLSv1.2_2021'
+        //             if(!domainBlock) {
+        //                 return {
+        //                     cloudfront_default_certificate: true
+        //                 }
+        //             }
+        //             return {
+        //                 acm_certificate_arn: domainBlock.certArn,
+        //                 ssl_support_method: 'sni-only',
+        //                 minimum_protocol_version: minimumProtocolVersion
+        //             }
+        //         })()
+        //     ])
+        // })
+      ];
+      if (domainBlock) {
+        databags.push(...domainBlock.databags);
+      }
+      if (container["cr_[terraform]"]) {
+        databags.push(cloudTerraform("", "", prependTfStateFileName(container["cr_[terraform]"][""][0].Value, `_${AWS_NEXT_JS}_${bag.Name}`)));
+      }
+      let imports = [
+        {
+          name: `aws_next_js_aws_iam_lambda_role_${bag.Name}`,
+          url: AWS_IAM_URL,
+          input: [{
+            Type: AWS_IAM_LAMBDA_ROLE,
+            Name: "default",
+            Value: {
+              name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])],
+              cloudresource_dir: dir,
+              cloudresource_id: dir,
+              assumable_by: ["edgelambda.amazonaws.com", "lambda.amazonaws.com"],
+              statements: [
+                //the image optmization lambda needs to be able to read to the assets bucket
+                {
+                  Action: "s3:*",
+                  Effect: "Allow",
+                  Resource: [
+                    asTraversal(`aws_s3_bucket.assets.arn`),
+                    asTemplate([
+                      asTraversal(`aws_s3_bucket.assets.arn`),
+                      "*"
+                    ])
+                  ]
+                }
+              ]
+            }
+          }]
+        },
+        {
+          name: `aws_next_js_aws_lambda_${bag.Name}`,
+          url: AWS_LAMBDA_URL,
+          input: [
+            {
+              Type: AWS_FUNCTION,
+              Name: "server",
+              Value: {
+                cloudresource_dir: dir,
+                cloudresource_id: dir,
+                package: [{
+                  packaged_file: "server-function.zip"
+                }],
+                handler: "index.handler",
+                runtime: `nodejs${nodeJsVersion}.x`,
+                timeout: 10,
+                memory_size: 1024,
+                architecture: "arm64",
+                function_url_enabled: true,
+                name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])]
               }
-            ]
+            },
+            {
+              Type: AWS_FUNCTION,
+              Name: "image-optimization",
+              Value: {
+                cloudresource_dir: dir,
+                cloudresource_id: dir,
+                package: [{
+                  packaged_file: "image-optimization-function.zip"
+                }],
+                environment: [{
+                  BUCKET_NAME: asTraversal("aws_s3_bucket.assets.id")
+                }],
+                handler: "index.handler",
+                runtime: `nodejs${nodeJsVersion}.x`,
+                timeout: 25,
+                memory_size: 1536,
+                architecture: "arm64",
+                function_url_enabled: true,
+                name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])]
+              }
+            },
+            hasMiddleware ? {
+              Type: AWS_FUNCTION,
+              Name: "middleware",
+              Value: {
+                cloudresource_dir: dir,
+                cloudresource_id: dir,
+                //these paths are scoped to the directory in which the tf template is executed, hence no ${dir} prefix
+                package: [{
+                  packaged_file: "middleware-function.zip"
+                }],
+                handler: "index.handler",
+                runtime: `nodejs${nodeJsVersion}.x`,
+                memory_size: 128,
+                timeout: 5,
+                name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])]
+              }
+            } : null
+          ].filter((x) => x)
+        }
+      ];
+      return { databags, imports };
+    };
+    if (!(dotBuild.disabled && asVal(dotBuild.disabled))) {
+      pipe.pushWithParams({ name: "build", lifecycleSteps: ["generate"] }, () => {
+        return {
+          transforms: [nextJsBuild()]
+        };
+      });
+    }
+    pipe.pushWithParams({ name: "resources", lifecycleSteps: ["generate"] }, () => {
+      return tfDatabags();
+    });
+    pipe.pushWithParams({ name: "resources_export", lifecycleSteps: ["generate"] }, (input) => {
+      return {
+        databags: iterateAllBlocks(input.previousStepResult, (d) => d)
+      };
+    });
+    pipe.pushWithParams({ name: "tf_apply", lifecycleSteps: ["apply"] }, () => {
+      const imports = [{
+        name: "aws_cloudfront_static_hosting_apply",
+        url: TERRAFORM_EXECUTE_URL,
+        input: [{
+          Type: "terraform_execute",
+          Name: `aws_next_js_${bag.Name}`,
+          Value: {
+            display_name: `Terraform apply - aws_next_js.${bag.Name}`,
+            mode: "apply",
+            dir: `${outputDir}/aws_next_js_${bag.Name}`
           }
         }]
-      },
-      {
-        name: `aws_next_js_aws_lambda_${bag.Name}`,
-        url: AWS_LAMBDA_URL,
-        input: [
-          {
-            Type: AWS_FUNCTION,
-            Name: "middleware",
-            Value: {
-              cloudresource_dir: dir,
-              cloudresource_id: dir,
-              //these paths are scoped to the directory in which the tf template is executed, hence no ${dir} prefix
-              package: [{
-                packaged_file: "middleware-function.zip"
-              }],
-              handler: "index.handler",
-              runtime: `nodejs${nodeJsVersion}.x`,
-              memory_size: 128,
-              timeout: 5,
-              name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])]
-            }
-          },
-          {
-            Type: AWS_FUNCTION,
-            Name: "server",
-            Value: {
-              cloudresource_dir: dir,
-              cloudresource_id: dir,
-              package: [{
-                packaged_file: "server-function.zip"
-              }],
-              handler: "index.handler",
-              runtime: `nodejs${nodeJsVersion}.x`,
-              timeout: 10,
-              memory_size: 1024,
-              architecture: "arm64",
-              function_url_enabled: true,
-              name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])]
-            }
-          },
-          {
-            Type: AWS_FUNCTION,
-            Name: "image-optimization",
-            Value: {
-              cloudresource_dir: dir,
-              cloudresource_id: dir,
-              package: [{
-                packaged_file: "image-optimization-function.zip"
-              }],
-              environment: [{
-                BUCKET_NAME: asTraversal("aws_s3_bucket.assets.id")
-              }],
-              handler: "index.handler",
-              runtime: `nodejs${nodeJsVersion}.x`,
-              timeout: 25,
-              memory_size: 1536,
-              architecture: "arm64",
-              function_url_enabled: true,
-              name_prefix: [appendToTemplate(namePrefix, [`${bag.Name}-`])]
-            }
-          }
-        ]
+      }];
+      return { imports };
+    });
+    pipe.pushWithParams({ name: "upload", lifecycleSteps: ["apply"] }, (input) => {
+      const terraformExecuteResults = getHistoryItem(input.history, "tf_apply")?.databags;
+      if (!terraformExecuteResults?.terraform_execute_output?.[`aws_next_js_${bag.Name}`]) {
+        return;
       }
-    ];
-    if (!(dotBuild.disabled && asVal(dotBuild.disabled))) {
-      databags.push(nextJsBuild());
-    }
-    if (container["cr_[terraform]"]) {
-      databags.push(cloudTerraform("", "", prependTfStateFileName(container, `_aws_next_js_${bag.Name}`)));
-    }
-    return [{ databags, imports }];
-  }
-  function generate() {
-    const dbOrImports = iterateBlocks(container, AWS_NEXT_JS, generateIterator1).flat();
-    exportDatabags(dbOrImports.map((db) => db.databags).flat());
-    exportDatabags(importComponents(container, dbOrImports.map((db) => db.imports).flat()));
-  }
-  function applyIterator1(bag) {
-    if (!bag.Value) {
-      return [];
-    }
-    return [{
-      Type: "terraform_execute",
-      Name: `aws_next_js_${bag.Name}`,
-      Value: {
-        display_name: `Terraform apply - aws_next_js.${bag.Name}`,
-        mode: "apply",
-        dir: `${outputDir}/aws_next_js_${bag.Name}`
-      }
-    }];
-  }
-  var applyIterator2 = (terraformExecuteResults) => (bag) => {
-    if (!bag.Value) {
-      return [];
-    }
-    let databags = [];
-    if (container["cr_[terraform]"]) {
-      databags.push(
-        BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-          [bag.Name]: prependTfStateFileName(container, `_aws_next_js_${bag.Name}`)
-        })
-      );
-    }
-    let imports = [];
-    if (terraformExecuteResults.terraform_execute_output?.[`aws_next_js_${bag.Name}`]) {
       const outputs = asValArrayConst(terraformExecuteResults.terraform_execute_output[`aws_next_js_${bag.Name}`][0].Value);
       const bucketName = asStr(outputs.find((pair) => asStr(pair.key) === "assets_s3_bucket").value);
-      imports.push({
+      const imports = [{
         name: `aws_next_js_${bag.Name}`,
         url: AWS_S3_SYNC_URL,
         input: [{
@@ -1371,106 +1550,61 @@
             blob: "."
           }
         }]
-      });
-    }
-    return [{ databags, imports }];
-  };
-  var applyIterator3 = (terraformExecuteResults) => (bag) => {
-    if (!bag.Value) {
-      return [];
-    }
-    const [block, namePrefix] = applyDefaults(container, bag.Value);
-    if (!terraformExecuteResults.terraform_execute_output?.[`aws_next_js_${bag.Name}`]) {
-      return [];
-    }
-    const outputs = asValArrayConst(terraformExecuteResults.terraform_execute_output[`aws_next_js_${bag.Name}`][0].Value);
-    const cfDistribId = asStr(outputs.find((pair) => asStr(pair.key) === "cf_distrib").value);
-    const awsCreds = getAwsCreds();
-    if (!awsCreds) {
-      throw new Error("couldn't find AWS credentials");
-    }
-    return [{
-      Type: "buildkit_run_in_container",
-      Name: `aws_cf_static_hosting_invalidate_${bag.Name}`,
-      Value: {
-        no_cache: true,
-        display_name: `Invalidate CloudFront distribution - aws_next_js.${bag.Name}`,
-        dockerfile: `
-                FROM amazon/aws-cli:latest
-
-                ENV AWS_ACCESS_KEY_ID="${awsCreds.access_key_id}"
-                ENV AWS_SECRET_ACCESS_KEY="${awsCreds.secret_access_key}"
-                ENV AWS_SESSION_TOKEN="${awsCreds.session_token}"
-                ENV AWS_REGION="${asStr(block.region || os.getenv("AWS_REGION") || "us-east-1")}"
-                ENV AWS_PAGER=""
-
-                RUN aws cloudfront create-invalidation --distribution-id ${cfDistribId} --paths "/*"`
+      }];
+      return { imports };
+    });
+    pipe.pushWithParams({ name: "invalidate", lifecycleSteps: ["apply"] }, (input) => {
+      const terraformExecuteResults = getHistoryItem(input.history, "tf_apply")?.databags;
+      if (!terraformExecuteResults?.terraform_execute_output?.[`aws_next_js_${bag.Name}`]) {
+        return {};
       }
-    }];
-  };
-  function apply() {
-    const step0Import = {
-      name: "aws_cloudfront_static_hosting_apply",
-      url: TERRAFORM_EXECUTE_URL,
-      input: [
-        ...iterateBlocks(container, AWS_NEXT_JS, applyIterator1).flat(),
-        ...makeEmptyExecuteDatabags(container, state)
-      ]
-    };
-    const terraformExecuteResults = importComponents(container, [step0Import]);
-    exportDatabags(emptyExecutePostProcess(container, terraformExecuteResults, AWS_NEXT_JS, CREATED_TF_STATE_KEY));
-    const step2Result = iterateBlocks(container, AWS_NEXT_JS, applyIterator2(terraformExecuteResults)).flat();
-    exportDatabags(step2Result.map((db) => db.databags).flat());
-    importComponents(container, step2Result.map((db) => db.imports).flat());
-    applyTransformers(iterateBlocks(container, AWS_NEXT_JS, applyIterator3(terraformExecuteResults)).flat());
-  }
-  function destroyIterator1(bag) {
-    if (!bag.Value) {
-      return [];
-    }
-    return [{
-      Type: "terraform_execute",
-      Name: `aws_next_js_destroy_${bag.Name}`,
-      Value: {
-        display_name: `Terraform destroy - aws_next_js.${bag.Name}`,
-        mode: "destroy",
-        dir: `${outputDir}/aws_next_js_${bag.Name}`
+      const outputs = asValArrayConst(terraformExecuteResults.terraform_execute_output[`aws_next_js_${bag.Name}`][0].Value);
+      const cfDistribId = asStr(outputs.find((pair) => asStr(pair.key) === "cf_distrib").value);
+      const awsCreds = getAwsCreds();
+      if (!awsCreds) {
+        throw new Error("couldn't find AWS credentials");
       }
-    }];
+      const transforms = [{
+        Type: "buildkit_run_in_container",
+        Name: `aws_cf_static_hosting_invalidate_${bag.Name}`,
+        Value: {
+          no_cache: true,
+          display_name: `Invalidate CloudFront distribution - aws_next_js.${bag.Name}`,
+          dockerfile: `
+                    FROM amazon/aws-cli:latest
+    
+                    ENV AWS_ACCESS_KEY_ID="${awsCreds.access_key_id}"
+                    ENV AWS_SECRET_ACCESS_KEY="${awsCreds.secret_access_key}"
+                    ENV AWS_SESSION_TOKEN="${awsCreds.session_token}"
+                    ENV AWS_REGION="${asStr(block.region || os.getenv("AWS_REGION") || "us-east-1")}"
+                    ENV AWS_PAGER=""
+    
+                    RUN aws cloudfront create-invalidation --distribution-id ${cfDistribId} --paths "/*"`
+        }
+      }];
+      return { transforms };
+    });
+    pipe.pushWithParams({ name: "tf_destroy", lifecycleSteps: ["destroy"] }, () => {
+      const imports = [{
+        name: "aws_cloudfront_static_hosting_destroy",
+        url: TERRAFORM_EXECUTE_URL,
+        input: [{
+          Type: "terraform_execute",
+          Name: `aws_next_js_destroy_${bag.Name}`,
+          Value: {
+            display_name: `Terraform destroy - aws_next_js.${bag.Name}`,
+            mode: "destroy",
+            dir: `${outputDir}/aws_next_js_${bag.Name}`
+          }
+        }]
+      }];
+      return { imports };
+    });
+    return pipe;
   }
-  function destroyIterator2(bag) {
-    if (!bag.Value) {
-      return [];
-    }
-    return [
-      BarbeState.deleteFromObject(CREATED_TF_STATE_KEY, bag.Name)
-    ];
-  }
-  function destroy() {
-    let step0Import = {
-      name: "aws_next_js_destroy",
-      url: TERRAFORM_EXECUTE_URL,
-      input: [
-        ...iterateBlocks(container, AWS_NEXT_JS, destroyIterator1).flat(),
-        ...makeEmptyExecuteDatabags(container, state)
-      ]
-    };
-    const results = importComponents(container, [step0Import]);
-    exportDatabags(emptyExecutePostProcess(container, results, AWS_NEXT_JS, CREATED_TF_STATE_KEY));
-    exportDatabags(iterateBlocks(container, AWS_NEXT_JS, destroyIterator2).flat());
-  }
-  switch (barbeLifecycleStep()) {
-    case "pre_generate":
-      preGenerate();
-      break;
-    case "generate":
-      generate();
-      break;
-    case "apply":
-      apply();
-      break;
-    case "destroy":
-      destroy();
-      break;
-  }
+  executePipelineGroup(container, [
+    ...iterateBlocks(container, AWS_NEXT_JS, awsNextJs).flat(),
+    autoDeleteMissingTfState(container, AWS_NEXT_JS),
+    autoCreateStateStore(container, AWS_NEXT_JS, "s3")
+  ]);
 })();

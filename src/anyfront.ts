@@ -4,8 +4,12 @@ import { isFailure } from '../../barbe-serverless/src/barbe-std/rpc';
 import { ANYFRONT, STATIC_HOSTING, STATIC_HOSTING_URL, AWS_NEXT_JS, AWS_NEXT_JS_URL, GCP_NEXT_JS_URL, GCP_NEXT_JS, AWS_SVELTEKIT, AWS_SVELTEKIT_URL } from './anyfront-lib/consts';
 import { applyDefaults, DatabagObjVal, compileBlockParam } from '../../barbe-serverless/src/barbe-sls-lib/lib';
 import { Pipeline, executePipelineGroup, Step, step, pipeline } from './anyfront-lib/pipeline';
+import { autoDeleteMissing2 } from './anyfront-lib/lib';
 
 const container = readDatabagContainer()
+
+type SupportedPlatform = 'aws' | 'gcp'
+const SupportedPlatforms: SupportedPlatform[] = ['aws', 'gcp']
 
 type SupportedFramework = 'react-spa' | 
 'next' |
@@ -15,6 +19,16 @@ type SupportedFramework = 'react-spa' |
 'solidstart' |
 'svelte-spa' |
 'sveltekit'
+const SupportedFrameworks: SupportedFramework[] = [
+    'react-spa',
+    'next',
+    'next-export',
+    'vue-spa',
+    'solidjs-spa',
+    'solidstart',
+    'svelte-spa',
+    'sveltekit'
+]
 
 type CrawlResult = {
     location: string
@@ -105,8 +119,7 @@ function findAppDirs(dir: string): CrawlResult[] {
     return results
 }
 
-function staticHostingPipeline(app: AppBundle): Step[] {
-    const { bag, block, appInfo } = app
+function staticHostingPipeline(apps: AppBundle[]): Step[] {
     return [
         step(() => ({
             imports: [{
@@ -118,119 +131,113 @@ function staticHostingPipeline(app: AppBundle): Step[] {
                     'state_store',
                     'static_hosting_build_dir_map'
                 ],
-                input: [{
+                input: apps.map(app => ({
                     Type: STATIC_HOSTING,
-                    Name: bag.Name,
+                    Name: app.bag.Name,
                     Value: {
-                        ...block,
+                        ...app.block,
                         build: [{
-                            ...compileBlockParam(block, 'build'),
-                            build_dir: appInfo.location,
+                            ...compileBlockParam(app.block, 'build'),
+                            build_dir: app.appInfo.location,
                             ...app.extraSettings,
                         }]
                     }
-                }]
+                }))
             }]
         })),
         step(({previousStepResult}) => exportDatabags(previousStepResult))
     ]
 }
 
-function sveltekitAwsPipeline(app: AppBundle): Step[] {
-    const { bag, block, appInfo } = app
+function sveltekitAwsPipeline(apps: AppBundle[]): Step[] {
     return [
         step(() => ({
             imports: [{
                 url: AWS_SVELTEKIT_URL,
                 copyFromContainer: ['cr_[terraform]', 'default', 'global_default', 'state_store'],
-                input: [{
+                input: apps.map(app => ({
                     Type: AWS_SVELTEKIT,
-                    Name: bag.Name,
+                    Name: app.bag.Name,
                     Value: {
-                        ...block,
-                        app_dir: appInfo.location,
+                        ...app.block,
+                        app_dir: app.appInfo.location,
                         ...app.extraSettings,
                     }
-                }]
+                }))
             }]
         })),
         step(({previousStepResult}) => exportDatabags(previousStepResult))
     ]
 }
 
-function nextAwsPipeline(app: AppBundle): Step[] {
-    const { bag, block, appInfo } = app
+function nextAwsPipeline(apps: AppBundle[]): Step[] {
     return [
         step(() => ({
             imports: [{
                 url: AWS_NEXT_JS_URL,
                 copyFromContainer: ['cr_[terraform]', 'default', 'global_default', 'state_store'],
-                input: [{
+                input: apps.map((app) => ({
                     Type: AWS_NEXT_JS,
-                    Name: bag.Name,
+                    Name: app.bag.Name,
                     Value: {
-                        ...block,
-                        app_dir: appInfo.location,
+                        ...app.block,
+                        app_dir: app.appInfo.location,
                         ...app.extraSettings,
                     }
-                }]
+                }))
             }]
         })),
         step(({previousStepResult}) => exportDatabags(previousStepResult))
     ]
 }
 
-function nextGcpPipeline(app: AppBundle): Step[] {
-    const { bag, block, appInfo } = app
+function nextGcpPipeline(apps: AppBundle[]): Step[] {
     return [
         step(() => ({
             imports: [{
                 url: GCP_NEXT_JS_URL,
                 copyFromContainer: ['cr_[terraform]', 'default', 'global_default', 'state_store'],
-                input: [{
+                input: apps.map(app => ({
                     Type: GCP_NEXT_JS,
-                    Name: bag.Name,
+                    Name: app.bag.Name,
                     Value: {
-                        ...block,
-                        app_dir: appInfo.location,
+                        ...app.block,
+                        app_dir: app.appInfo.location,
                         ...app.extraSettings,
                     }
-                }]
+                }))
             }]
         })),
         step(({previousStepResult}) => exportDatabags(previousStepResult))
     ]
 }
 
-function makeAppPipeline(app: AppBundle): Pipeline {
-    const { bag, block, appInfo } = app
-    if(!block.platform) {
-        throw new Error(`'platform' is required for anyfront.${bag.Name}`)
-    }
-    const platform = asStr(block.platform)
-
+function makePipeline(framework: SupportedFramework, platform: SupportedPlatform, apps: AppBundle[]): Pipeline {
     let steps: Step[] = []
-    switch(appInfo.framework) {
+    switch(framework) {
         case 'next-export':
             // since `next build && next export` generates both a `.next` folder an a `out` folder
             // we help anyfront know that the `out` folder is the one that should be deployed
-            app.extraSettings = {
-                build_output_dir: 'out'
-            }
+            apps.forEach(app => {
+                app.extraSettings = {
+                    build_output_dir: 'out'
+                }
+                return app
+            })
         case 'react-spa':
         case 'vue-spa':
         case 'solidjs-spa':
         case 'svelte-spa':
         default:
-            steps = staticHostingPipeline(app)
+            steps = staticHostingPipeline(apps)
             break
         case 'next':
             switch(platform) {
                 case 'aws':
-                    steps = nextAwsPipeline(app)
+                    steps = nextAwsPipeline(apps)
                     break
                 case 'gcp':
-                    steps = nextGcpPipeline(app)
+                    steps = nextGcpPipeline(apps)
                     break
                 default:
                     throw new Error(`next.js not supported on platform '${platform}'`)
@@ -239,16 +246,53 @@ function makeAppPipeline(app: AppBundle): Pipeline {
         case 'sveltekit':
             switch(platform) {
                 case 'aws':
-                    steps = sveltekitAwsPipeline(app)
+                    steps = sveltekitAwsPipeline(apps)
                     break
                 default:
-                    throw new Error(`sveltkit not supported on platform '${platform}' yet`)
+                    throw new Error(`sveltekit not supported on platform '${platform}' yet`)
             }
             break
         // case 'solidstart':
         //     throw new Error(`framework '${appInfo.framework}' not supported yet`)
     }
-    return pipeline(steps, { name: 'anyfront' })
+    return pipeline(steps, { name: `anyfront-${framework}-${platform}` })
+}
+
+function makeAppPipelines(apps: AppBundle[]): Pipeline[] {
+    //we need to group them by type otherwise the auto delete detection will delete each other
+    let appPerType: { [key in SupportedFramework]?: { [key in SupportedPlatform]?: AppBundle[] } } = {}
+    for(const app of apps) {
+        if(!app.block.platform) {
+            throw new Error(`'platform' is required for 'anyfront' block`)
+        }
+        const platform = asStr(app.block.platform)
+        if(!appPerType[app.appInfo.framework]) {
+            appPerType[app.appInfo.framework] = {}
+        }
+        if(!appPerType[app.appInfo.framework]![platform]) {
+            appPerType[app.appInfo.framework]![platform] = []
+        }
+        appPerType[app.appInfo.framework]![platform]!.push(app)
+    }
+    let pipelines: Pipeline[] = []
+    for(const [framework, platforms] of Object.entries(appPerType)) {
+        for (const [platform, apps] of Object.entries(platforms)) {
+            pipelines.push(makePipeline(framework as SupportedFramework, platform as SupportedPlatform, apps))
+        }
+    }
+
+    //if there is no anyfront block, or if there is no app of a given framework+plaform, we run an empty import on that component
+    for(const framework of SupportedFrameworks) {
+        for(const platform of SupportedPlatforms) {
+            if(!appPerType[framework] || !appPerType[framework]![platform]) {
+                try{
+                    //this will throw an error if the framework+platform is not supported
+                    pipelines.push(makePipeline(framework as SupportedFramework, platform as SupportedPlatform, []))
+                }catch(e){}
+            }
+        }
+    }
+    return pipelines
 }
 
 
@@ -260,7 +304,7 @@ type AppBundle = {
     extraSettings?: any
 }
 
-function dostuff() {
+function main() {
     const foundApps = iterateBlocks(container, ANYFRONT, (bag): AppBundle | null => {
         if(!bag.Value) {
             return null
@@ -293,8 +337,7 @@ function dostuff() {
             appInfo
         }
     }).flat().filter(t => t) as AppBundle[]
-    const pipelines = foundApps.map(makeAppPipeline)
-    executePipelineGroup(container, pipelines)
+    executePipelineGroup(container, makeAppPipelines(foundApps))
 }
 
-dostuff()
+main()

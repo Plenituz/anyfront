@@ -264,6 +264,13 @@
       }))
     };
   }
+  function asFuncCall(funcName, args) {
+    return {
+      Type: "function_call",
+      FunctionName: funcName,
+      FunctionArgs: args.map(asSyntax)
+    };
+  }
   function asTemplate(arr) {
     return {
       Type: "template",
@@ -1235,9 +1242,7 @@
           policy: asTraversal("data.aws_iam_policy_document.assets_policy.json")
         }),
         cloudOutput("", "cf_distrib", {
-          //TODO tmp
-          value: "ETKQNEEXPHH5T"
-          //asTraversal('aws_cloudfront_distribution.distribution.id'),
+          value: asTraversal("aws_cloudfront_distribution.distribution.id")
         }),
         cloudResource("aws_cloudfront_cache_policy", "next_js_default", {
           name: appendToTemplate(namePrefix, [`${bag.Name}-default-cache-policy`]),
@@ -1273,130 +1278,129 @@
         }),
         cloudData("aws_cloudfront_cache_policy", "caching_optimized", {
           name: "Managed-CachingOptimized"
+        }),
+        cloudResource("aws_cloudfront_distribution", "distribution", {
+          enabled: true,
+          is_ipv6_enabled: true,
+          price_class: "PriceClass_All",
+          restrictions: asBlock([{
+            geo_restriction: asBlock([{
+              restriction_type: "none"
+            }])
+          }]),
+          origin: asBlock([
+            {
+              domain_name: asTraversal("aws_s3_bucket.assets.bucket_regional_domain_name"),
+              origin_id: "assets",
+              s3_origin_config: asBlock([{
+                origin_access_identity: asTraversal("aws_cloudfront_origin_access_identity.assets_access_id.cloudfront_access_identity_path")
+              }])
+            },
+            {
+              domain_name: asFuncCall(
+                "replace",
+                [
+                  asFuncCall("replace", [
+                    asTraversal("aws_function.server.function_url"),
+                    "https://",
+                    ""
+                  ]),
+                  "/",
+                  ""
+                ]
+              ),
+              origin_id: "server",
+              custom_origin_config: asBlock([{
+                http_port: 80,
+                https_port: 443,
+                origin_protocol_policy: "https-only",
+                origin_ssl_protocols: ["TLSv1.2"]
+              }])
+            },
+            {
+              domain_name: asFuncCall(
+                "replace",
+                [
+                  asFuncCall("replace", [
+                    asTraversal("aws_function.image-optimization.function_url"),
+                    "https://",
+                    ""
+                  ]),
+                  "/",
+                  ""
+                ]
+              ),
+              origin_id: "image-optimization",
+              custom_origin_config: asBlock([{
+                http_port: 80,
+                https_port: 443,
+                origin_protocol_policy: "https-only",
+                origin_ssl_protocols: ["TLSv1.2"]
+              }])
+            }
+          ]),
+          origin_group: asBlock([{
+            origin_id: "server-or-assets",
+            member: asBlock([
+              { origin_id: "server" },
+              { origin_id: "assets" }
+            ]),
+            failover_criteria: asBlock([{
+              status_codes: [404]
+            }])
+          }]),
+          default_cache_behavior: asBlock([{
+            allowed_methods: ["GET", "HEAD"],
+            cached_methods: ["GET", "HEAD"],
+            viewer_protocol_policy: "redirect-to-https",
+            target_origin_id: "server-or-assets",
+            compress: true,
+            cache_policy_id: asTraversal("aws_cloudfront_cache_policy.next_js_default.id"),
+            lambda_function_association: hasMiddleware ? asBlock([{
+              event_type: "viewer-request",
+              lambda_arn: asTraversal("aws_function.middleware.qualified_arn"),
+              include_body: false
+            }]) : null
+          }]),
+          ordered_cache_behavior: asBlock([
+            serverBehavior("api/*"),
+            serverBehavior("_next/data/*"),
+            {
+              path_pattern: "_next/image*",
+              allowed_methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "OPTIONS", "DELETE"],
+              cached_methods: ["GET", "HEAD", "OPTIONS"],
+              viewer_protocol_policy: "redirect-to-https",
+              target_origin_id: "image-optimization",
+              compress: true,
+              cache_policy_id: asTraversal("aws_cloudfront_cache_policy.next_js_default.id")
+            },
+            {
+              path_pattern: "_next/*",
+              allowed_methods: ["GET", "HEAD", "OPTIONS"],
+              cached_methods: ["GET", "HEAD", "OPTIONS"],
+              viewer_protocol_policy: "redirect-to-https",
+              target_origin_id: "assets",
+              compress: true,
+              cache_policy_id: asTraversal("data.aws_cloudfront_cache_policy.caching_optimized.id")
+            }
+          ]),
+          aliases: domainBlock?.domainNames || [],
+          viewer_certificate: asBlock([
+            (() => {
+              const minimumProtocolVersion = "TLSv1.2_2021";
+              if (!domainBlock) {
+                return {
+                  cloudfront_default_certificate: true
+                };
+              }
+              return {
+                acm_certificate_arn: domainBlock.certArn,
+                ssl_support_method: "sni-only",
+                minimum_protocol_version: minimumProtocolVersion
+              };
+            })()
+          ])
         })
-        //TODO tmp
-        // cloudResource('aws_cloudfront_distribution', 'distribution', {
-        //     enabled: true,
-        //     is_ipv6_enabled: true,
-        //     price_class: "PriceClass_All",
-        //     restrictions: asBlock([{
-        //         geo_restriction: asBlock([{
-        //             restriction_type: "none"
-        //         }])
-        //     }]),
-        //     origin: asBlock([
-        //         {
-        //             domain_name: asTraversal("aws_s3_bucket.assets.bucket_regional_domain_name"),
-        //             origin_id: "assets",
-        //             s3_origin_config: asBlock([{
-        //                 origin_access_identity: asTraversal("aws_cloudfront_origin_access_identity.assets_access_id.cloudfront_access_identity_path")
-        //             }])
-        //         },
-        //         {
-        //             domain_name: asFuncCall(
-        //                 "replace", 
-        //                 [
-        //                     asFuncCall( "replace", [
-        //                         asTraversal("aws_function.server.function_url"),
-        //                         "https://",
-        //                         ""
-        //                     ]),
-        //                     "/",
-        //                     ""
-        //                 ]
-        //             ),
-        //             origin_id: "server",
-        //             custom_origin_config: asBlock([{
-        //                 http_port: 80,
-        //                 https_port: 443,
-        //                 origin_protocol_policy: "https-only",
-        //                 origin_ssl_protocols: ["TLSv1.2"]
-        //             }]),
-        //         },
-        //         {
-        //             domain_name: asFuncCall(
-        //                 "replace", 
-        //                 [
-        //                     asFuncCall( "replace", [
-        //                         asTraversal("aws_function.image-optimization.function_url"),
-        //                         "https://",
-        //                         ""
-        //                     ]),
-        //                     "/",
-        //                     ""
-        //                 ]
-        //             ),
-        //             origin_id: "image-optimization",
-        //             custom_origin_config: asBlock([{
-        //                 http_port: 80,
-        //                 https_port: 443,
-        //                 origin_protocol_policy: "https-only",
-        //                 origin_ssl_protocols: ["TLSv1.2"]
-        //             }]),
-        //         }
-        //     ]),
-        //     origin_group: asBlock([{
-        //         origin_id: "server-or-assets",
-        //         member: asBlock([
-        //             { origin_id: "server" },
-        //             { origin_id: "assets" }
-        //         ]),
-        //         failover_criteria: asBlock([{
-        //             status_codes: [404]
-        //         }])
-        //     }]),
-        //     default_cache_behavior: asBlock([{
-        //         allowed_methods: ["GET", "HEAD"],
-        //         cached_methods: ["GET", "HEAD"],
-        //         viewer_protocol_policy: "redirect-to-https",
-        //         target_origin_id: "server-or-assets",
-        //         compress: true,
-        //         cache_policy_id: asTraversal("aws_cloudfront_cache_policy.next_js_default.id"),
-        //         lambda_function_association: hasMiddleware ? asBlock([{
-        //             event_type: "viewer-request",
-        //             lambda_arn: asTraversal("aws_function.middleware.qualified_arn"),
-        //             include_body: false
-        //         }]) : null,
-        //     }]),
-        //     ordered_cache_behavior: asBlock([
-        //         serverBehavior("api/*"),
-        //         serverBehavior("_next/data/*"),
-        //         {
-        //             path_pattern: "_next/image*",
-        //             allowed_methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "OPTIONS", "DELETE"],
-        //             cached_methods: ["GET", "HEAD", "OPTIONS"],
-        //             viewer_protocol_policy: "redirect-to-https",
-        //             target_origin_id: "image-optimization",
-        //             compress: true,
-        //             cache_policy_id: asTraversal("aws_cloudfront_cache_policy.next_js_default.id"),
-        //         },
-        //         {
-        //             path_pattern: "_next/*",
-        //             allowed_methods: ["GET", "HEAD", "OPTIONS"],
-        //             cached_methods: ["GET", "HEAD", "OPTIONS"],
-        //             viewer_protocol_policy: "redirect-to-https",
-        //             target_origin_id: "assets",
-        //             compress: true,
-        //             cache_policy_id: asTraversal("data.aws_cloudfront_cache_policy.caching_optimized.id"),
-        //         }
-        //     ]),
-        //     aliases: domainBlock?.domainNames || [],
-        //     viewer_certificate: asBlock([
-        //         (() => {
-        //             const minimumProtocolVersion = 'TLSv1.2_2021'
-        //             if(!domainBlock) {
-        //                 return {
-        //                     cloudfront_default_certificate: true
-        //                 }
-        //             }
-        //             return {
-        //                 acm_certificate_arn: domainBlock.certArn,
-        //                 ssl_support_method: 'sni-only',
-        //                 minimum_protocol_version: minimumProtocolVersion
-        //             }
-        //         })()
-        //     ])
-        // })
       ];
       if (domainBlock) {
         databags.push(...domainBlock.databags);

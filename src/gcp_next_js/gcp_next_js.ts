@@ -287,7 +287,7 @@ function gcpNextJs(bag: Databag): Pipeline {
     })
     pipe.pushWithParams({ name: 'tf_destroy', lifecycleSteps: ['destroy'] }, (input) => {
         const gcpProjectSetupResults = getHistoryItem(input.history, 'gcp_project_setup_get_info')?.databags
-        if(!gcpProjectSetupResults?.gcp_project_setup_output[`gcp_next_js_get_info_${bag.Name}`]) {
+        if(!gcpProjectSetupResults?.gcp_project_setup_output?.[`gcp_next_js_get_info_${bag.Name}`]) {
             return
         }
         const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[`gcp_next_js_get_info_${bag.Name}`][0].Value!).project_name)

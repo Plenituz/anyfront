@@ -10,8 +10,13 @@ state_store {
     gcs {}
 }
 
+git_clone "user_repo" {
+    uri = env.GIT_URL
+}
+
 anyfront "site" {
     platform = "gcp"
+    app_dir = git_clone.user_repo.dir
 
     domain {
         name = env.DOMAIN

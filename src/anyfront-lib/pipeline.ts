@@ -14,6 +14,31 @@ export function mergeDatabagContainers(...containers: DatabagContainer[]): Datab
     return output
 }
 
+//modifies the original, but also returns it for convenience
+export function addToStepOutput(original: StepOutput, ...outputs: StepOutput[]): StepOutput {
+    for(const output of outputs) {
+        if(output.imports) {
+            if(!original.imports) {
+                original.imports = []
+            }
+            original.imports.push(...output.imports)
+        }
+        if(output.databags) {
+            if(!original.databags) {
+                original.databags = []
+            }
+            original.databags.push(...output.databags)
+        }
+        if(output.transforms) {
+            if(!original.transforms) {
+                original.transforms = []
+            }
+            original.transforms.push(...output.transforms)
+        }
+    }
+    return original
+}
+
 export type HistoryItem = {
     stepNames: string[]
     databags: DatabagContainer

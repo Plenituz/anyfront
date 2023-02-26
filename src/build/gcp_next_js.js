@@ -446,15 +446,15 @@
     }
     return resp.result;
   }
+  function throwStatement(message) {
+    throw new Error(message);
+  }
   function readDatabagContainer() {
     return JSON.parse(os.file.readFile("__barbe_input.json"));
   }
   var IS_VERBOSE = os.getenv("BARBE_VERBOSE") === "1";
   function barbeLifecycleStep() {
     return os.getenv("BARBE_LIFECYCLE_STEP");
-  }
-  function barbeCommand() {
-    return os.getenv("BARBE_COMMAND");
   }
   function barbeOutputDir() {
     return os.getenv("BARBE_OUTPUT_DIR");
@@ -476,7 +476,7 @@
       Name: key,
       Value: value
     }),
-    getObjectValue: (state2, key, valueKey) => state2 && state2[key] && state2[key][valueKey],
+    getObjectValue: (state, key, valueKey) => state && state[key] && state[key][valueKey],
     deleteFromObject: (key, valueKey) => ({
       Type: "barbe_state(delete_from_object)",
       Name: key,
@@ -627,66 +627,146 @@
     return str;
   }
 
-  // anyfront-lib/lib.ts
-  function emptyExecuteBagNamePrefix(stateKey) {
-    return `${stateKey}_destroy_missing_`;
-  }
-  function emptyExecuteTemplate(container2, state2, blockType, stateKey) {
-    const stateObj = state2[stateKey] || {};
-    if (!stateObj) {
-      return [];
-    }
-    let output = [];
-    for (const [bagName, tfBlock] of Object.entries(stateObj)) {
-      if (container2[blockType][bagName]) {
-        continue;
-      }
-      output.push({
-        Type: "terraform_empty_execute",
-        Name: `${emptyExecuteBagNamePrefix(stateKey)}${bagName}`,
-        Value: {
-          display_name: `Destroy missing ${blockType}.${bagName}`,
-          mode: "apply",
-          template_json: JSON.stringify({
-            terraform: (() => {
-              let tfObj = {};
-              for (const [key, value] of Object.entries(tfBlock)) {
-                tfObj[key] = {
-                  [value[0].Meta.Labels[0]]: (() => {
-                    let obj = {};
-                    for (const [innerKey, innerValue] of Object.entries(value[0])) {
-                      obj[innerKey] = innerValue;
-                    }
-                    return obj;
-                  })()
-                };
-              }
-              return tfObj;
-            })()
-          })
+  // anyfront-lib/pipeline.ts
+  function mergeDatabagContainers(...containers) {
+    let output = {};
+    for (const container2 of containers) {
+      for (const [blockType, block] of Object.entries(container2)) {
+        output[blockType] = output[blockType] || {};
+        for (const [bagName, bag] of Object.entries(block)) {
+          output[blockType][bagName] = output[blockType][bagName] || [];
+          output[blockType][bagName].push(...bag);
         }
+      }
+    }
+    return output;
+  }
+  function addToStepOutput(original, ...outputs) {
+    for (const output of outputs) {
+      if (output.imports) {
+        if (!original.imports) {
+          original.imports = [];
+        }
+        original.imports.push(...output.imports);
+      }
+      if (output.databags) {
+        if (!original.databags) {
+          original.databags = [];
+        }
+        original.databags.push(...output.databags);
+      }
+      if (output.transforms) {
+        if (!original.transforms) {
+          original.transforms = [];
+        }
+        original.transforms.push(...output.transforms);
+      }
+    }
+    return original;
+  }
+  function executePipelineGroup(container2, pipelines) {
+    const lifecycleStep = barbeLifecycleStep();
+    const maxStep = pipelines.map((p) => p.steps.length).reduce((a, b) => Math.max(a, b), 0);
+    let previousStepResult = {};
+    let history = [];
+    for (let i = 0; i < maxStep; i++) {
+      let stepResults = {};
+      let stepImports = [];
+      let stepTransforms = [];
+      let stepDatabags = [];
+      let stepNames = [];
+      for (let pipeline2 of pipelines) {
+        if (i >= pipeline2.steps.length) {
+          continue;
+        }
+        const stepMeta = pipeline2.steps[i];
+        if (stepMeta.name) {
+          stepNames.push(stepMeta.name);
+        }
+        if (stepMeta.lifecycleSteps && stepMeta.lifecycleSteps.length > 0) {
+          if (!stepMeta.lifecycleSteps.includes(lifecycleStep)) {
+            if (IS_VERBOSE) {
+              console.log(`${pipeline2.name}: skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} (${lifecycleStep} not in [${stepMeta.lifecycleSteps.join(", ")}]`);
+            }
+            continue;
+          }
+        }
+        if (IS_VERBOSE) {
+          console.log(`${pipeline2.name}: running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""}`);
+          console.log(`step ${i} input:`, JSON.stringify(previousStepResult));
+        }
+        let stepRequests = stepMeta.f({
+          previousStepResult,
+          history
+        });
+        if (IS_VERBOSE) {
+          console.log(`${pipeline2.name}: step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} requests:`, JSON.stringify(stepRequests));
+        }
+        if (!stepRequests) {
+          continue;
+        }
+        if (stepRequests.imports) {
+          stepImports.push(...stepRequests.imports);
+        }
+        if (stepRequests.transforms) {
+          stepTransforms.push(...stepRequests.transforms);
+        }
+        if (stepRequests.databags) {
+          stepDatabags.push(...stepRequests.databags);
+        }
+      }
+      if (stepImports.length > 0) {
+        const importsResults = importComponents(container2, stepImports);
+        stepResults = mergeDatabagContainers(stepResults, importsResults);
+      }
+      if (stepTransforms.length > 0) {
+        const transformResults = applyTransformers(stepTransforms);
+        stepResults = mergeDatabagContainers(stepResults, transformResults);
+      }
+      if (stepDatabags.length > 0) {
+        exportDatabags(stepDatabags);
+      }
+      if (IS_VERBOSE) {
+        console.log(`step ${i} output:`, JSON.stringify(stepResults));
+      }
+      history.push({
+        databags: stepResults,
+        stepNames
       });
+      previousStepResult = stepResults;
     }
-    return output;
   }
-  function emptyExecutePostProcess(container2, results, blockType, stateKey) {
-    if (!results.terraform_empty_execute_output) {
-      return [];
-    }
-    let output = [];
-    const prefix = emptyExecuteBagNamePrefix(stateKey);
-    for (const prefixedName of Object.keys(results.terraform_empty_execute_output)) {
-      if (!prefixedName.startsWith(prefix)) {
-        continue;
+  function getHistoryItem(history, stepName) {
+    for (const item of history) {
+      if (item.stepNames.includes(stepName)) {
+        return item;
       }
-      const nonPrefixedName = prefixedName.replace(prefix, "");
-      if (container2?.[blockType]?.[nonPrefixedName]) {
-        continue;
-      }
-      output.push(BarbeState.deleteFromObject(stateKey, nonPrefixedName));
     }
-    return output;
+    return null;
   }
+  function step(f, params) {
+    return {
+      ...params,
+      f
+    };
+  }
+  function pipeline(steps, params) {
+    return {
+      ...params,
+      steps,
+      pushWithParams(params2, f) {
+        this.steps.push(step(f, params2));
+      },
+      push(f) {
+        this.steps.push(step(f));
+      },
+      merge(...steps2) {
+        this.steps.push(...steps2);
+      }
+    };
+  }
+
+  // anyfront-lib/lib.ts
   function prependTfStateFileName(tfBlock, prefix) {
     const visitor = (token) => {
       if (token.Type === "literal_value" && typeof token.Value === "string" && token.Value.includes(".tfstate")) {
@@ -700,66 +780,162 @@
     };
     return visitTokens(tfBlock, visitor);
   }
+  function autoDeleteMissingTfState(container2, bagType, onDelete) {
+    return autoDeleteMissing2(container2, {
+      bagType,
+      createSavable: (bagType2, bagName) => {
+        return prependTfStateFileName(container2["cr_[terraform]"][""][0].Value, `_${bagType2}_${bagName}`);
+      },
+      deleteMissing: (bagType2, bagName, savedValue) => {
+        const imports = [{
+          url: TERRAFORM_EXECUTE_URL,
+          input: [{
+            Type: "terraform_empty_execute",
+            Name: `auto_delete_${bagType2}_${bagName}`,
+            Value: {
+              display_name: `Destroy missing ${bagType2}.${bagName}`,
+              mode: "apply",
+              template_json: JSON.stringify({
+                // :)
+                //turn the saved json objects back into a `terraform {}` block
+                terraform: (() => {
+                  let tfObj = {};
+                  for (const [key, value] of Object.entries(savedValue)) {
+                    if (!value || key === "Meta") {
+                      continue;
+                    }
+                    tfObj[key] = {
+                      [value[0].Meta?.Labels[0]]: (() => {
+                        let obj = {};
+                        for (const [innerKey, innerValue] of Object.entries(value[0])) {
+                          if (!innerValue || innerKey === "Meta") {
+                            continue;
+                          }
+                          obj[innerKey] = innerValue;
+                        }
+                        return obj;
+                      })()
+                    };
+                  }
+                  return tfObj;
+                })()
+              })
+            }
+          }]
+        }];
+        let output = { imports };
+        if (onDelete) {
+          addToStepOutput(output, onDelete(bagType2, bagName, savedValue));
+        }
+        return output;
+      }
+    });
+  }
+  function autoDeleteMissing2(container2, input) {
+    const state = BarbeState.readState();
+    const STATE_KEY_NAME = "auto_delete_missing_tracker";
+    const applyPipe = pipeline([], { name: `auto_delete_${input.bagType}` });
+    applyPipe.pushWithParams({ name: "delete_missing", lifecycleSteps: ["apply", "destroy"] }, () => {
+      if (!container2["cr_[terraform]"]) {
+        return;
+      }
+      const stateObj = state[STATE_KEY_NAME];
+      if (!stateObj) {
+        return;
+      }
+      let output = {
+        databags: [],
+        imports: [],
+        transforms: []
+      };
+      for (const [bagName, savedValue] of Object.entries(stateObj)) {
+        if (!savedValue || bagName === "Meta") {
+          continue;
+        }
+        if (container2?.[input.bagType]?.[bagName]) {
+          continue;
+        }
+        const deleteMissing = input.deleteMissing(input.bagType, bagName, savedValue);
+        output.databags.push(...deleteMissing.databags || []);
+        output.imports.push(...deleteMissing.imports || []);
+        output.transforms.push(...deleteMissing.transforms || []);
+      }
+      return output;
+    });
+    applyPipe.pushWithParams({ name: "cleanup_state", lifecycleSteps: ["post_apply"] }, () => {
+      if (!container2["cr_[terraform]"]) {
+        return;
+      }
+      const databags = Object.keys(container2?.[input.bagType] || {}).map((bagName) => BarbeState.putInObject(STATE_KEY_NAME, {
+        [bagName]: input.createSavable(input.bagType, bagName)
+      }));
+      for (const [bagName, savedValue] of Object.entries(state[STATE_KEY_NAME] || {})) {
+        if (!savedValue || bagName === "Meta") {
+          continue;
+        }
+        if (container2?.[input.bagType]?.[bagName]) {
+          continue;
+        }
+        databags.push(BarbeState.deleteFromObject(STATE_KEY_NAME, bagName));
+      }
+      return { databags };
+    });
+    applyPipe.pushWithParams({ name: "cleanup_state_destroy", lifecycleSteps: ["post_destroy"] }, () => {
+      const databags = [];
+      for (const [bagName, savedValue] of Object.entries(state[STATE_KEY_NAME] || {})) {
+        if (bagName === "Meta") {
+          continue;
+        }
+        databags.push(BarbeState.deleteFromObject(STATE_KEY_NAME, bagName));
+      }
+    });
+    return applyPipe;
+  }
+  function autoCreateStateStore(container2, blockName, kind) {
+    if (container2.state_store) {
+      return pipeline([]);
+    }
+    return pipeline([
+      step(() => {
+        const databags = iterateBlocks(container2, blockName, (bag) => {
+          const [block, namePrefix] = applyDefaults(container2, bag.Value);
+          if (!isSimpleTemplate(namePrefix)) {
+            return [];
+          }
+          let value = {
+            name_prefix: [`${bag.Name}-`]
+          };
+          switch (kind) {
+            case "s3":
+              value["s3"] = asBlock([{}]);
+              break;
+            case "gcs":
+              const dotGcpProject = compileBlockParam(block, "google_cloud_project");
+              value["gcs"] = asBlock([{
+                project_id: block.google_cloud_project_id || block.project_id || dotGcpProject.project_id
+              }]);
+              break;
+            default:
+              throwStatement(`Unknown state_store kind '${kind}'`);
+          }
+          return [{
+            Type: "state_store",
+            Name: "",
+            Value: value
+          }];
+        }).flat();
+        return { databags };
+      }, { lifecycleSteps: ["pre_generate"] })
+    ]);
+  }
 
   // gcp_next_js/gcp_next_js.ts
   var container = readDatabagContainer();
   var outputDir = barbeOutputDir();
-  var state = BarbeState.readState();
-  var CREATED_TF_STATE_KEY = "created_tfstate";
-  function makeEmptyExecuteDatabags(container2, state2) {
-    if (!container2["cr_[terraform]"]) {
-      return [];
-    }
-    return emptyExecuteTemplate(container2, state2, GCP_NEXT_JS, CREATED_TF_STATE_KEY);
-  }
-  function makeGcpProjectSetupImport(bag, block, namePrefix) {
-    return {
-      name: `gcp_next_js_${barbeLifecycleStep()}_${bag.Name}`,
-      url: GCP_PROJECT_SETUP_URL,
-      copyFromContainer: ["cr_[terraform]"],
-      input: [{
-        Type: GCP_PROJECT_SETUP,
-        Name: bag.Name,
-        Value: {
-          project_id: block.project_id,
-          project_name: appendToTemplate(namePrefix, [bag.Name]),
-          organization_id: block.organization_id,
-          billing_account_id: block.billing_account_id,
-          billing_account_name: block.billing_account_name,
-          services_to_activate: [
-            "run.googleapis.com",
-            "compute.googleapis.com",
-            "dns.googleapis.com"
-          ]
-        }
-      }]
-    };
-  }
-  function preGenerate() {
-    if (container.state_store) {
-      return;
-    }
-    const databags = iterateBlocks(container, GCP_NEXT_JS, (bag) => {
-      const [block, namePrefix] = applyDefaults(container, bag.Value);
-      if (!isSimpleTemplate(namePrefix)) {
-        return [];
-      }
-      return [{
-        Type: "state_store",
-        Name: "",
-        Value: {
-          name_prefix: [`${bag.Name}-`],
-          gcs: asBlock([{
-            project_id: block.project_id
-          }])
-        }
-      }];
-    }).flat();
-    exportDatabags(databags);
-  }
-  function generateIterator1(bag) {
+  function gcpNextJs(bag) {
+    let pipe = pipeline([], { name: `gcp_next_js.${bag.Name}` });
     if (!bag.Value) {
-      return [];
+      return pipe;
     }
     const [block, namePrefix] = applyDefaults(container, bag.Value);
     const dir = `gcp_next_js_${bag.Name}`;
@@ -770,6 +946,9 @@
     const dotDomain = compileBlockParam(block, "domain");
     const dotBuild = compileBlockParam(block, "build");
     const nodeJsVersion = asStr(dotBuild.nodejs_version || block.nodejs_version || "16");
+    const imageName = asStr(appendToTemplate(namePrefix, ["next-", bag.Name]));
+    const nodeJsVersionTag = asStr(dotBuild.nodejs_version_tag || block.nodejs_version_tag || "-alpine");
+    const gcpToken = getGcpToken(false);
     const cloudResource = preConfCloudResourceFactory(block, "resource", void 0, bagPreconf);
     const cloudData = preConfCloudResourceFactory(block, "data", void 0, bagPreconf);
     const cloudOutput = preConfCloudResourceFactory(block, "output", void 0, bagPreconf);
@@ -777,7 +956,7 @@
     const cloudVariable = preConfCloudResourceFactory(block, "variable", void 0, bagPreconf);
     const cloudTerraform = preConfCloudResourceFactory(block, "terraform", void 0, bagPreconf);
     const nextJsBuild = () => {
-      const nodeJsVersionTag = asStr(dotBuild.nodejs_version_tag || block.nodejs_version_tag || "-alpine");
+      const nodeJsVersionTag2 = asStr(dotBuild.nodejs_version_tag || block.nodejs_version_tag || "-alpine");
       const appDir = asStr(dotBuild.app_dir || block.app_dir || ".");
       const installCmd = asStr(dotBuild.install_cmd || "npm install");
       const buildCmd = asStr(dotBuild.build_cmd || "npm run build");
@@ -794,13 +973,14 @@
           dockerfile: `
                     # https://github.com/vercel/next.js/blob/canary/examples/with-docker/Dockerfile
                     # Rebuild the source code only when needed
-                    FROM node:${nodeJsVersion}${nodeJsVersionTag} AS builder
+                    FROM node:${nodeJsVersion}${nodeJsVersionTag2} AS builder
                     RUN apk add --no-cache libc6-compat
 
                     WORKDIR /app
                     COPY --from=src ./${appDir} .
                     
                     ENV NEXT_TELEMETRY_DISABLED 1
+                    ENV NEXT_PRIVATE_STANDALONE true
                     RUN ${installCmd}
                     RUN ${buildCmd}
 
@@ -989,244 +1169,206 @@
           })
         );
       }
+      console.log("dsfsdfg", JSON.stringify(container["cr_[terraform]"]));
+      if (container["cr_[terraform]"]) {
+        localDatabags.push(cloudTerraform("", "", prependTfStateFileName(container["cr_[terraform]"][""][0].Value, `_${GCP_NEXT_JS}_${bag.Name}`)));
+      }
       return localDatabags;
     };
-    let databags = gcpNextJsResources();
-    if (barbeCommand() !== "destroy" && !(dotBuild.disabled && asVal(dotBuild.disabled))) {
-      databags.push(nextJsBuild());
+    if (!(dotBuild.disabled && asVal(dotBuild.disabled))) {
+      pipe.pushWithParams({ name: "build", lifecycleSteps: ["generate"] }, () => {
+        return {
+          transforms: [nextJsBuild()]
+        };
+      });
     }
-    if (container["cr_[terraform]"]) {
-      databags.push(cloudTerraform("", "", prependTfStateFileName(container["cr_[terraform]"][""][0].Value, `_gcp_next_js_${bag.Name}`)));
-    }
-    return [{
-      databags,
-      imports: [makeGcpProjectSetupImport(bag, block, namePrefix)]
-    }];
-  }
-  function generate() {
-    const dbOrImports = iterateBlocks(container, GCP_NEXT_JS, generateIterator1).flat();
-    exportDatabags(dbOrImports.map((db) => db.databags).flat());
-    exportDatabags(importComponents(container, dbOrImports.map((db) => db.imports).flat()));
-  }
-  function applyIteratorStep1(bag) {
-    if (!bag.Value) {
-      return [];
-    }
-    const [block, namePrefix] = applyDefaults(container, bag.Value);
-    return [
-      makeGcpProjectSetupImport(bag, block, namePrefix)
-    ];
-  }
-  var applyIteratorStep2 = (gcpProjectSetupResults) => (bag) => {
-    if (!bag.Value) {
-      return [];
-    }
-    if (!gcpProjectSetupResults.gcp_project_setup_output?.[bag.Name]) {
-      return [];
-    }
-    const [block, namePrefix] = applyDefaults(container, bag.Value);
-    const dotBuild = compileBlockParam(block, "build");
-    const gcpToken = getGcpToken(false);
-    const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value).project_name);
-    const imageName = asStr(appendToTemplate(namePrefix, ["next-", bag.Name]));
-    const dir = `${outputDir}/gcp_next_js_${bag.Name}`;
-    const buildDir = `${dir}/build`;
-    const nodeJsVersion = asStr(dotBuild.nodejs_version || block.nodejs_version || "16");
-    const nodeJsVersionTag = asStr(dotBuild.nodejs_version_tag || block.nodejs_version_tag || "-alpine");
-    const gcpNginxImageBuild = {
-      Type: "buildkit_run_in_container",
-      Name: `${bag.Name}_gcp_next_js`,
-      Value: {
-        display_name: `Image build - gcp_next_js.${bag.Name}`,
-        no_cache: true,
-        input_files: {
-          "__barbe_Dockerfile": applyMixins(Dockerfile_default, {
-            node_version: nodeJsVersion,
-            node_version_tag: nodeJsVersionTag
-          })
-        },
-        dockerfile: `
-                FROM docker
-
-                RUN echo "${gcpToken}" | docker login -u oauth2accesstoken --password-stdin https://gcr.io
-
-                COPY --from=src ./${buildDir} /src
-                WORKDIR /src
-
-                RUN mkdir __barbe_tmp
-                COPY --from=src __barbe_Dockerfile ./__barbe_tmp/Dockerfile
-
-                RUN --mount=type=ssh,id=docker.sock,target=/var/run/docker.sock docker build -f __barbe_tmp/Dockerfile -t gcr.io/${gcpProjectName}/${imageName} .
-                RUN --mount=type=ssh,id=docker.sock,target=/var/run/docker.sock docker push gcr.io/${gcpProjectName}/${imageName}`
-      }
-    };
-    const tfExecute = {
-      name: `gcp_cloudrun_static_hosting_apply_${bag.Name}`,
-      url: TERRAFORM_EXECUTE_URL,
-      input: [{
-        Type: "terraform_execute",
-        Name: `gcp_next_js_apply_${bag.Name}`,
-        Value: {
-          display_name: `Terraform apply - gcp_next_js.${bag.Name}`,
-          mode: "apply",
-          dir,
-          variable_values: [{
-            key: "gcp_project",
-            value: gcpProjectName
-          }]
-        }
-      }]
-    };
-    return [{
-      databags: [gcpNginxImageBuild],
-      imports: [tfExecute]
-    }];
-  };
-  var applyIteratorStep3 = (gcpProjectSetupResults, terraformExecuteResults) => (bag) => {
-    if (!bag.Value) {
-      return [];
-    }
-    let databags = [];
-    if (container["cr_[terraform]"]) {
-      databags.push(
-        BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-          [bag.Name]: prependTfStateFileName(container["cr_[terraform]"][""][0].Value, `_gcp_next_js_${bag.Name}`)
-        })
-      );
-    }
-    if (!terraformExecuteResults.terraform_execute_output?.[`gcp_next_js_apply_${bag.Name}`]) {
-      return databags;
-    }
-    const [block, namePrefix] = applyDefaults(container, bag.Value);
-    const tfOutput = asValArrayConst(terraformExecuteResults.terraform_execute_output[`gcp_next_js_apply_${bag.Name}`][0].Value);
-    const cloudrunServiceName = asStr(tfOutput.find((pair) => asStr(pair.key) === "cloudrun_service_name").value);
-    const urlMapName = asStr(tfOutput.find((pair) => asStr(pair.key) === "load_balancer_url_map").value);
-    const imageName = asStr(appendToTemplate(namePrefix, ["next-", bag.Name]));
-    const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value).project_name);
-    const gcpToken = getGcpToken(false);
-    const region = asStr(block.region || "us-central1");
-    databags.push({
-      Type: "buildkit_run_in_container",
-      Name: `gcp_next_js_invalidate_${bag.Name}`,
-      Value: {
-        display_name: `Invalidate CDN - gcp_next_js.${bag.Name}`,
-        no_cache: true,
-        dockerfile: `
-            FROM google/cloud-sdk:slim
-
-            ENV CLOUDSDK_AUTH_ACCESS_TOKEN="${gcpToken}"
-            ENV CLOUDSDK_CORE_DISABLE_PROMPTS=1
-
-            RUN gcloud run deploy ${cloudrunServiceName} --image gcr.io/${gcpProjectName}/${imageName} --project ${gcpProjectName} --region ${region} --quiet
-            RUN gcloud beta compute url-maps invalidate-cdn-cache ${urlMapName} --path "/*" --project ${gcpProjectName} --async --quiet`
-      }
+    pipe.pushWithParams({ name: "resources", lifecycleSteps: ["generate"] }, () => {
+      return {
+        databags: gcpNextJsResources()
+      };
     });
-    return databags;
-  };
-  function apply() {
-    let step0Import = iterateBlocks(container, GCP_NEXT_JS, applyIteratorStep1).flat();
-    const emptyApplies = makeEmptyExecuteDatabags(container, state);
-    if (emptyApplies.length !== 0) {
-      step0Import.push({
-        name: "gcp_next_js_empty_apply",
-        url: TERRAFORM_EXECUTE_URL,
-        input: emptyApplies
-      });
-    }
-    const gcpProjectSetupResults = importComponents(container, step0Import);
-    const step1 = iterateBlocks(container, GCP_NEXT_JS, applyIteratorStep2(gcpProjectSetupResults)).flat();
-    exportDatabags(emptyExecutePostProcess(container, gcpProjectSetupResults, GCP_NEXT_JS, CREATED_TF_STATE_KEY));
-    applyTransformers(step1.map((db) => db.databags).flat());
-    const terraformExecuteResults = importComponents(container, step1.map((db) => db.imports).flat());
-    applyTransformers(iterateBlocks(container, GCP_NEXT_JS, applyIteratorStep3(gcpProjectSetupResults, terraformExecuteResults)).flat());
-  }
-  function destroyIteratorGetGcpProjectInfo(bag) {
-    if (!bag.Value) {
-      return [];
-    }
-    return [{
-      Type: GCP_PROJECT_SETUP_GET_INFO,
-      Name: `gcp_next_js_get_info_${bag.Name}`,
-      Value: {
-        name: bag.Name
+    pipe.pushWithParams({ name: "gcp_project_setup_get_info", lifecycleSteps: ["destroy"] }, () => {
+      const imports = [{
+        name: "gcp_next_js_get_project_info_destroy",
+        url: GCP_PROJECT_SETUP_URL,
+        input: [{
+          Type: GCP_PROJECT_SETUP_GET_INFO,
+          Name: `gcp_next_js_get_info_${bag.Name}`,
+          Value: {
+            name: bag.Name
+          }
+        }]
+      }];
+      return { imports };
+    });
+    pipe.pushWithParams({ name: "tf_destroy", lifecycleSteps: ["destroy"] }, (input) => {
+      const gcpProjectSetupResults = getHistoryItem(input.history, "gcp_project_setup_get_info")?.databags;
+      if (!gcpProjectSetupResults?.gcp_project_setup_output[`gcp_next_js_get_info_${bag.Name}`]) {
+        return;
       }
-    }];
-  }
-  function destroyIterator1(bag) {
-    if (!bag.Value) {
-      return [];
-    }
-    const [block, namePrefix] = applyDefaults(container, bag.Value);
-    return [
-      makeGcpProjectSetupImport(bag, block, namePrefix)
-    ];
-  }
-  var destroyIterator2 = (gcpProjectSetupResults) => (bag) => {
-    if (!bag.Value) {
-      return [];
-    }
-    if (!gcpProjectSetupResults.gcp_project_setup_output || !gcpProjectSetupResults.gcp_project_setup_output[`gcp_next_js_get_info_${bag.Name}`]) {
-      return [];
-    }
-    const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[`gcp_next_js_get_info_${bag.Name}`][0].Value).project_name);
-    return [{
-      name: `gcp_next_js_destroy_${bag.Name}`,
-      url: TERRAFORM_EXECUTE_URL,
-      input: [{
-        Type: "terraform_execute",
-        Name: `gcp_next_js_destroy_${bag.Name}`,
-        Value: {
-          display_name: `Terraform destroy - gcp_next_js.${bag.Name}`,
-          mode: "destroy",
-          dir: `${outputDir}/gcp_next_js_${bag.Name}`,
-          variable_values: [{
-            key: "gcp_project",
-            value: gcpProjectName
-          }]
-        }
-      }]
-    }];
-  };
-  function destroyIterator3(bag) {
-    if (!bag.Value) {
-      return [];
-    }
-    return [
-      BarbeState.deleteFromObject(CREATED_TF_STATE_KEY, bag.Name)
-    ];
-  }
-  function destroy() {
-    const gcpGetProjectInfoResults = importComponents(container, [{
-      name: "gcp_next_js_get_project_info_destroy",
-      url: GCP_PROJECT_SETUP_URL,
-      input: iterateBlocks(container, GCP_NEXT_JS, destroyIteratorGetGcpProjectInfo).flat()
-    }]);
-    let step1 = iterateBlocks(container, GCP_NEXT_JS, destroyIterator2(gcpGetProjectInfoResults)).flat();
-    const emptyApplies = makeEmptyExecuteDatabags(container, state);
-    if (emptyApplies.length !== 0) {
-      step1.push({
-        name: "gcp_next_js_empty_apply_destroy",
+      const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[`gcp_next_js_get_info_${bag.Name}`][0].Value).project_name);
+      const imports = [{
         url: TERRAFORM_EXECUTE_URL,
-        input: emptyApplies
-      });
-    }
-    const emptyExecuteResults = importComponents(container, step1);
-    importComponents(container, iterateBlocks(container, GCP_NEXT_JS, destroyIterator1).flat());
-    exportDatabags(emptyExecutePostProcess(container, emptyExecuteResults, GCP_NEXT_JS, CREATED_TF_STATE_KEY));
-    exportDatabags(iterateBlocks(container, GCP_NEXT_JS, destroyIterator3).flat());
+        input: [{
+          Type: "terraform_execute",
+          Name: `gcp_next_js_destroy_${bag.Name}`,
+          Value: {
+            display_name: `Terraform destroy - gcp_next_js.${bag.Name}`,
+            mode: "destroy",
+            dir: `${outputDir}/gcp_next_js_${bag.Name}`,
+            variable_values: [{
+              key: "gcp_project",
+              value: gcpProjectName
+            }]
+          }
+        }]
+      }];
+      return { imports };
+    });
+    pipe.pushWithParams({ name: "gcp_project_setup", lifecycleSteps: ["generate", "apply", "post_apply", "destroy", "post_destroy"] }, () => {
+      return {
+        imports: [{
+          url: GCP_PROJECT_SETUP_URL,
+          copyFromContainer: ["cr_[terraform]"],
+          input: [{
+            Type: GCP_PROJECT_SETUP,
+            Name: bag.Name,
+            Value: {
+              project_id: block.project_id,
+              project_name: appendToTemplate(namePrefix, [bag.Name]),
+              organization_id: block.organization_id,
+              billing_account_id: block.billing_account_id,
+              billing_account_name: block.billing_account_name,
+              services_to_activate: [
+                "run.googleapis.com",
+                "compute.googleapis.com",
+                "dns.googleapis.com"
+              ]
+            }
+          }]
+        }]
+      };
+    });
+    pipe.pushWithParams({ name: "gcp_project_setup_export", lifecycleSteps: ["generate", "apply", "destroy"] }, (input) => {
+      return {
+        databags: iterateAllBlocks(input.previousStepResult, (b) => b)
+      };
+    });
+    pipe.pushWithParams({ name: "build_img", lifecycleSteps: ["apply"] }, (input) => {
+      const gcpProjectSetupResults = getHistoryItem(input.history, "gcp_project_setup")?.databags;
+      if (!gcpProjectSetupResults?.gcp_project_setup_output?.[bag.Name]) {
+        return;
+      }
+      const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value).project_name);
+      const absoluteDir = `${outputDir}/${dir}`;
+      const buildDir = `${absoluteDir}/build`;
+      const gcpNginxImageBuild = {
+        Type: "buildkit_run_in_container",
+        Name: `${bag.Name}_gcp_next_js`,
+        Value: {
+          display_name: `Image build - gcp_next_js.${bag.Name}`,
+          no_cache: true,
+          input_files: {
+            "__barbe_Dockerfile": applyMixins(Dockerfile_default, {
+              node_version: nodeJsVersion,
+              node_version_tag: nodeJsVersionTag
+            })
+          },
+          dockerfile: `
+                    FROM docker
+    
+                    RUN echo "${gcpToken}" | docker login -u oauth2accesstoken --password-stdin https://gcr.io
+    
+                    COPY --from=src ./${buildDir} /src
+                    WORKDIR /src
+    
+                    RUN mkdir __barbe_tmp
+                    COPY --from=src __barbe_Dockerfile ./__barbe_tmp/Dockerfile
+    
+                    RUN --mount=type=ssh,id=docker.sock,target=/var/run/docker.sock docker build -f __barbe_tmp/Dockerfile -t gcr.io/${gcpProjectName}/${imageName} .
+                    RUN --mount=type=ssh,id=docker.sock,target=/var/run/docker.sock docker push gcr.io/${gcpProjectName}/${imageName}`
+        }
+      };
+      return {
+        transforms: [gcpNginxImageBuild]
+      };
+    });
+    pipe.pushWithParams({ name: "tf_apply", lifecycleSteps: ["apply"] }, (input) => {
+      const gcpProjectSetupResults = getHistoryItem(input.history, "gcp_project_setup")?.databags;
+      if (!gcpProjectSetupResults?.gcp_project_setup_output?.[bag.Name]) {
+        return;
+      }
+      const absoluteDir = `${outputDir}/${dir}`;
+      const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value).project_name);
+      const tfExecute = {
+        url: TERRAFORM_EXECUTE_URL,
+        input: [{
+          Type: "terraform_execute",
+          Name: `gcp_next_js_apply_${bag.Name}`,
+          Value: {
+            display_name: `Terraform apply - gcp_next_js.${bag.Name}`,
+            mode: "apply",
+            dir: absoluteDir,
+            variable_values: [{
+              key: "gcp_project",
+              value: gcpProjectName
+            }]
+          }
+        }]
+      };
+      return {
+        imports: [tfExecute]
+      };
+    });
+    pipe.pushWithParams({ name: "invalidate", lifecycleSteps: ["apply"] }, (input) => {
+      const gcpProjectSetupResults = getHistoryItem(input.history, "gcp_project_setup")?.databags;
+      const terraformExecuteResults = getHistoryItem(input.history, "tf_apply")?.databags;
+      if (!terraformExecuteResults?.terraform_execute_output?.[`gcp_next_js_apply_${bag.Name}`]) {
+        return;
+      }
+      if (!gcpProjectSetupResults?.gcp_project_setup_output?.[bag.Name]) {
+        return;
+      }
+      const tfOutput = asValArrayConst(terraformExecuteResults.terraform_execute_output[`gcp_next_js_apply_${bag.Name}`][0].Value);
+      const cloudrunServiceName = asStr(tfOutput.find((pair) => asStr(pair.key) === "cloudrun_service_name").value);
+      const urlMapName = asStr(tfOutput.find((pair) => asStr(pair.key) === "load_balancer_url_map").value);
+      const gcpProjectName = asStr(asVal(gcpProjectSetupResults.gcp_project_setup_output[bag.Name][0].Value).project_name);
+      const region = asStr(block.region || "us-central1");
+      const transforms = [{
+        Type: "buildkit_run_in_container",
+        Name: `gcp_next_js_invalidate_${bag.Name}`,
+        Value: {
+          display_name: `Invalidate CDN - gcp_next_js.${bag.Name}`,
+          no_cache: true,
+          dockerfile: `
+                FROM google/cloud-sdk:slim
+    
+                ENV CLOUDSDK_AUTH_ACCESS_TOKEN="${gcpToken}"
+                ENV CLOUDSDK_CORE_DISABLE_PROMPTS=1
+    
+                RUN gcloud run deploy ${cloudrunServiceName} --image gcr.io/${gcpProjectName}/${imageName} --project ${gcpProjectName} --region ${region} --quiet
+                RUN gcloud beta compute url-maps invalidate-cdn-cache ${urlMapName} --path "/*" --project ${gcpProjectName} --async --quiet`
+        }
+      }];
+      return { transforms };
+    });
+    return pipe;
   }
-  switch (barbeLifecycleStep()) {
-    case "pre_generate":
-      preGenerate();
-      break;
-    case "generate":
-      generate();
-      break;
-    case "apply":
-      apply();
-      break;
-    case "destroy":
-      destroy();
-      break;
+  var pipes = [
+    ...iterateBlocks(container, GCP_NEXT_JS, gcpNextJs).flat(),
+    autoDeleteMissingTfState(container, GCP_NEXT_JS),
+    autoCreateStateStore(container, GCP_NEXT_JS, "gcs")
+  ];
+  if (container["cr_[terraform]"] && !container[GCP_NEXT_JS]) {
+    pipes.push(pipeline([
+      step(() => ({
+        imports: [{
+          url: GCP_PROJECT_SETUP_URL,
+          copyFromContainer: ["cr_[terraform]"],
+          input: []
+        }]
+      }))
+    ]));
   }
+  executePipelineGroup(container, pipes);
 })();

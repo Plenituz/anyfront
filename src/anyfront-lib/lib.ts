@@ -2,7 +2,7 @@ import { asStr, BarbeState, Databag, DatabagContainer, ImportComponentInput, isS
 import * as _ from '../../../barbe-serverless/src/barbe-std/spidermonkey-globals';
 import { isFailure } from '../../../barbe-serverless/src/barbe-std/rpc';
 import { TERRAFORM_EXECUTE_URL } from './consts';
-import { Pipeline, pipeline, step, StepOutput } from './pipeline';
+import { addToStepOutput, Pipeline, pipeline, step, StepOutput } from './pipeline';
 import { applyDefaults, compileBlockParam } from '../../../barbe-serverless/src/barbe-sls-lib/lib';
 
 /**
@@ -163,7 +163,7 @@ export function findFilesInSubdirs(dir: string, fileName: string, ignoreDirs?: {
     return found;
 }
 
-export function autoDeleteMissingTfState(container: DatabagContainer, bagType: string): Pipeline {
+export function autoDeleteMissingTfState(container: DatabagContainer, bagType: string, onDelete?: (bagType: string, bagName: string, savedValue: { [key: string]: any }) => StepOutput): Pipeline {
     return autoDeleteMissing2(container, {
         bagType,
         createSavable: (bagType, bagName) => {
@@ -206,7 +206,11 @@ export function autoDeleteMissingTfState(container: DatabagContainer, bagType: s
                     }
                 }]
             }]
-            return { imports }
+            let output = { imports }
+            if(onDelete) {
+                addToStepOutput(output, onDelete(bagType, bagName, savedValue))
+            }
+            return output
         },
     })
 }
@@ -279,7 +283,7 @@ export function autoDeleteMissing2(container: DatabagContainer, input: AutoDelet
     applyPipe.pushWithParams({ name: 'cleanup_state_destroy', lifecycleSteps: ['post_destroy'] }, () => {
         const databags: SugarCoatedDatabag[] = []
         for(const [bagName, savedValue] of Object.entries(state[STATE_KEY_NAME] || {})) {
-            if(!savedValue || bagName === 'Meta') {
+            if(bagName === 'Meta') {
                 continue
             }
             databags.push(BarbeState.deleteFromObject(STATE_KEY_NAME, bagName))

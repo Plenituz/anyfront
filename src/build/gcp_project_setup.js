@@ -191,6 +191,21 @@
         };
     }
   }
+  function isSimpleTemplate(token) {
+    if (!token) {
+      return false;
+    }
+    if (typeof token === "string" || token.Type === "literal_value") {
+      return true;
+    }
+    if (token.Type !== "template") {
+      return false;
+    }
+    if (!token.Parts) {
+      return true;
+    }
+    return token.Parts.every(isSimpleTemplate);
+  }
   function asVal(token) {
     switch (token.Type) {
       case "template":
@@ -360,6 +375,18 @@
       throw new Error(resp.error);
     }
   }
+  function applyTransformers(input) {
+    const resp = barbeRpcCall({
+      method: "transformContainer",
+      params: [{
+        databags: input
+      }]
+    });
+    if (isFailure(resp)) {
+      throw new Error(resp.error);
+    }
+    return resp.result;
+  }
   function importComponents(container2, components) {
     let barbeImportComponent = [];
     for (const component of components) {
@@ -404,6 +431,9 @@
       throw new Error(resp.error);
     }
     return resp.result;
+  }
+  function throwStatement(message) {
+    throw new Error(message);
   }
   function readDatabagContainer() {
     return JSON.parse(os.file.readFile("__barbe_input.json"));
@@ -514,6 +544,9 @@
     }
     return output;
   }
+  function compileBlockParam(blockVal, blockName) {
+    return asVal(mergeTokens((blockVal[blockName] || asSyntax([])).ArrayConst || []));
+  }
   function preConfCloudResourceFactory(blockVal, kind, preconf, bagPreconf) {
     const cloudResourceId = blockVal.cloudresource_id ? asStr(blockVal.cloudresource_id) : void 0;
     const cloudResourceDir = blockVal.cloudresource_dir ? asStr(blockVal.cloudresource_dir) : void 0;
@@ -553,66 +586,146 @@
   var AWS_CLOUDFRONT_STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/aws_cloudfront_static_hosting.js:${ANYFRONT_VERSION}`;
   var STATIC_HOSTING_URL = `https://hub.barbe.app/anyfront/static_hosting.js:${ANYFRONT_VERSION}`;
 
-  // anyfront-lib/lib.ts
-  function emptyExecuteBagNamePrefix(stateKey) {
-    return `${stateKey}_destroy_missing_`;
-  }
-  function emptyExecuteTemplate(container2, state2, blockType, stateKey) {
-    const stateObj = state2[stateKey] || {};
-    if (!stateObj) {
-      return [];
-    }
-    let output = [];
-    for (const [bagName, tfBlock] of Object.entries(stateObj)) {
-      if (container2[blockType][bagName]) {
-        continue;
-      }
-      output.push({
-        Type: "terraform_empty_execute",
-        Name: `${emptyExecuteBagNamePrefix(stateKey)}${bagName}`,
-        Value: {
-          display_name: `Destroy missing ${blockType}.${bagName}`,
-          mode: "apply",
-          template_json: JSON.stringify({
-            terraform: (() => {
-              let tfObj = {};
-              for (const [key, value] of Object.entries(tfBlock)) {
-                tfObj[key] = {
-                  [value[0].Meta.Labels[0]]: (() => {
-                    let obj = {};
-                    for (const [innerKey, innerValue] of Object.entries(value[0])) {
-                      obj[innerKey] = innerValue;
-                    }
-                    return obj;
-                  })()
-                };
-              }
-              return tfObj;
-            })()
-          })
+  // anyfront-lib/pipeline.ts
+  function mergeDatabagContainers(...containers) {
+    let output = {};
+    for (const container2 of containers) {
+      for (const [blockType, block] of Object.entries(container2)) {
+        output[blockType] = output[blockType] || {};
+        for (const [bagName, bag] of Object.entries(block)) {
+          output[blockType][bagName] = output[blockType][bagName] || [];
+          output[blockType][bagName].push(...bag);
         }
+      }
+    }
+    return output;
+  }
+  function addToStepOutput(original, ...outputs) {
+    for (const output of outputs) {
+      if (output.imports) {
+        if (!original.imports) {
+          original.imports = [];
+        }
+        original.imports.push(...output.imports);
+      }
+      if (output.databags) {
+        if (!original.databags) {
+          original.databags = [];
+        }
+        original.databags.push(...output.databags);
+      }
+      if (output.transforms) {
+        if (!original.transforms) {
+          original.transforms = [];
+        }
+        original.transforms.push(...output.transforms);
+      }
+    }
+    return original;
+  }
+  function executePipelineGroup(container2, pipelines) {
+    const lifecycleStep = barbeLifecycleStep();
+    const maxStep = pipelines.map((p) => p.steps.length).reduce((a, b) => Math.max(a, b), 0);
+    let previousStepResult = {};
+    let history = [];
+    for (let i = 0; i < maxStep; i++) {
+      let stepResults = {};
+      let stepImports = [];
+      let stepTransforms = [];
+      let stepDatabags = [];
+      let stepNames = [];
+      for (let pipeline2 of pipelines) {
+        if (i >= pipeline2.steps.length) {
+          continue;
+        }
+        const stepMeta = pipeline2.steps[i];
+        if (stepMeta.name) {
+          stepNames.push(stepMeta.name);
+        }
+        if (stepMeta.lifecycleSteps && stepMeta.lifecycleSteps.length > 0) {
+          if (!stepMeta.lifecycleSteps.includes(lifecycleStep)) {
+            if (IS_VERBOSE) {
+              console.log(`${pipeline2.name}: skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} (${lifecycleStep} not in [${stepMeta.lifecycleSteps.join(", ")}]`);
+            }
+            continue;
+          }
+        }
+        if (IS_VERBOSE) {
+          console.log(`${pipeline2.name}: running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""}`);
+          console.log(`step ${i} input:`, JSON.stringify(previousStepResult));
+        }
+        let stepRequests = stepMeta.f({
+          previousStepResult,
+          history
+        });
+        if (IS_VERBOSE) {
+          console.log(`${pipeline2.name}: step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} requests:`, JSON.stringify(stepRequests));
+        }
+        if (!stepRequests) {
+          continue;
+        }
+        if (stepRequests.imports) {
+          stepImports.push(...stepRequests.imports);
+        }
+        if (stepRequests.transforms) {
+          stepTransforms.push(...stepRequests.transforms);
+        }
+        if (stepRequests.databags) {
+          stepDatabags.push(...stepRequests.databags);
+        }
+      }
+      if (stepImports.length > 0) {
+        const importsResults = importComponents(container2, stepImports);
+        stepResults = mergeDatabagContainers(stepResults, importsResults);
+      }
+      if (stepTransforms.length > 0) {
+        const transformResults = applyTransformers(stepTransforms);
+        stepResults = mergeDatabagContainers(stepResults, transformResults);
+      }
+      if (stepDatabags.length > 0) {
+        exportDatabags(stepDatabags);
+      }
+      if (IS_VERBOSE) {
+        console.log(`step ${i} output:`, JSON.stringify(stepResults));
+      }
+      history.push({
+        databags: stepResults,
+        stepNames
       });
+      previousStepResult = stepResults;
     }
-    return output;
   }
-  function emptyExecutePostProcess(container2, results, blockType, stateKey) {
-    if (!results.terraform_empty_execute_output) {
-      return [];
-    }
-    let output = [];
-    const prefix = emptyExecuteBagNamePrefix(stateKey);
-    for (const prefixedName of Object.keys(results.terraform_empty_execute_output)) {
-      if (!prefixedName.startsWith(prefix)) {
-        continue;
+  function getHistoryItem(history, stepName) {
+    for (const item of history) {
+      if (item.stepNames.includes(stepName)) {
+        return item;
       }
-      const nonPrefixedName = prefixedName.replace(prefix, "");
-      if (container2?.[blockType]?.[nonPrefixedName]) {
-        continue;
-      }
-      output.push(BarbeState.deleteFromObject(stateKey, nonPrefixedName));
     }
-    return output;
+    return null;
   }
+  function step(f, params) {
+    return {
+      ...params,
+      f
+    };
+  }
+  function pipeline(steps, params) {
+    return {
+      ...params,
+      steps,
+      pushWithParams(params2, f) {
+        this.steps.push(step(f, params2));
+      },
+      push(f) {
+        this.steps.push(step(f));
+      },
+      merge(...steps2) {
+        this.steps.push(...steps2);
+      }
+    };
+  }
+
+  // anyfront-lib/lib.ts
   function prependTfStateFileName(tfBlock, prefix) {
     const visitor = (token) => {
       if (token.Type === "literal_value" && typeof token.Value === "string" && token.Value.includes(".tfstate")) {
@@ -626,6 +739,154 @@
     };
     return visitTokens(tfBlock, visitor);
   }
+  function autoDeleteMissingTfState(container2, bagType, onDelete) {
+    return autoDeleteMissing2(container2, {
+      bagType,
+      createSavable: (bagType2, bagName) => {
+        return prependTfStateFileName(container2["cr_[terraform]"][""][0].Value, `_${bagType2}_${bagName}`);
+      },
+      deleteMissing: (bagType2, bagName, savedValue) => {
+        const imports = [{
+          url: TERRAFORM_EXECUTE_URL,
+          input: [{
+            Type: "terraform_empty_execute",
+            Name: `auto_delete_${bagType2}_${bagName}`,
+            Value: {
+              display_name: `Destroy missing ${bagType2}.${bagName}`,
+              mode: "apply",
+              template_json: JSON.stringify({
+                // :)
+                //turn the saved json objects back into a `terraform {}` block
+                terraform: (() => {
+                  let tfObj = {};
+                  for (const [key, value] of Object.entries(savedValue)) {
+                    if (!value || key === "Meta") {
+                      continue;
+                    }
+                    tfObj[key] = {
+                      [value[0].Meta?.Labels[0]]: (() => {
+                        let obj = {};
+                        for (const [innerKey, innerValue] of Object.entries(value[0])) {
+                          if (!innerValue || innerKey === "Meta") {
+                            continue;
+                          }
+                          obj[innerKey] = innerValue;
+                        }
+                        return obj;
+                      })()
+                    };
+                  }
+                  return tfObj;
+                })()
+              })
+            }
+          }]
+        }];
+        let output = { imports };
+        if (onDelete) {
+          addToStepOutput(output, onDelete(bagType2, bagName, savedValue));
+        }
+        return output;
+      }
+    });
+  }
+  function autoDeleteMissing2(container2, input) {
+    const state2 = BarbeState.readState();
+    const STATE_KEY_NAME = "auto_delete_missing_tracker";
+    const applyPipe = pipeline([], { name: `auto_delete_${input.bagType}` });
+    applyPipe.pushWithParams({ name: "delete_missing", lifecycleSteps: ["apply", "destroy"] }, () => {
+      if (!container2["cr_[terraform]"]) {
+        return;
+      }
+      const stateObj = state2[STATE_KEY_NAME];
+      if (!stateObj) {
+        return;
+      }
+      let output = {
+        databags: [],
+        imports: [],
+        transforms: []
+      };
+      for (const [bagName, savedValue] of Object.entries(stateObj)) {
+        if (!savedValue || bagName === "Meta") {
+          continue;
+        }
+        if (container2?.[input.bagType]?.[bagName]) {
+          continue;
+        }
+        const deleteMissing = input.deleteMissing(input.bagType, bagName, savedValue);
+        output.databags.push(...deleteMissing.databags || []);
+        output.imports.push(...deleteMissing.imports || []);
+        output.transforms.push(...deleteMissing.transforms || []);
+      }
+      return output;
+    });
+    applyPipe.pushWithParams({ name: "cleanup_state", lifecycleSteps: ["post_apply"] }, () => {
+      if (!container2["cr_[terraform]"]) {
+        return;
+      }
+      const databags = Object.keys(container2?.[input.bagType] || {}).map((bagName) => BarbeState.putInObject(STATE_KEY_NAME, {
+        [bagName]: input.createSavable(input.bagType, bagName)
+      }));
+      for (const [bagName, savedValue] of Object.entries(state2[STATE_KEY_NAME] || {})) {
+        if (!savedValue || bagName === "Meta") {
+          continue;
+        }
+        if (container2?.[input.bagType]?.[bagName]) {
+          continue;
+        }
+        databags.push(BarbeState.deleteFromObject(STATE_KEY_NAME, bagName));
+      }
+      return { databags };
+    });
+    applyPipe.pushWithParams({ name: "cleanup_state_destroy", lifecycleSteps: ["post_destroy"] }, () => {
+      const databags = [];
+      for (const [bagName, savedValue] of Object.entries(state2[STATE_KEY_NAME] || {})) {
+        if (bagName === "Meta") {
+          continue;
+        }
+        databags.push(BarbeState.deleteFromObject(STATE_KEY_NAME, bagName));
+      }
+    });
+    return applyPipe;
+  }
+  function autoCreateStateStore(container2, blockName, kind) {
+    if (container2.state_store) {
+      return pipeline([]);
+    }
+    return pipeline([
+      step(() => {
+        const databags = iterateBlocks(container2, blockName, (bag) => {
+          const [block, namePrefix] = applyDefaults(container2, bag.Value);
+          if (!isSimpleTemplate(namePrefix)) {
+            return [];
+          }
+          let value = {
+            name_prefix: [`${bag.Name}-`]
+          };
+          switch (kind) {
+            case "s3":
+              value["s3"] = asBlock([{}]);
+              break;
+            case "gcs":
+              const dotGcpProject = compileBlockParam(block, "google_cloud_project");
+              value["gcs"] = asBlock([{
+                project_id: block.google_cloud_project_id || block.project_id || dotGcpProject.project_id
+              }]);
+              break;
+            default:
+              throwStatement(`Unknown state_store kind '${kind}'`);
+          }
+          return [{
+            Type: "state_store",
+            Name: "",
+            Value: value
+          }];
+        }).flat();
+        return { databags };
+      }, { lifecycleSteps: ["pre_generate"] })
+    ]);
+  }
 
   // ../../barbe-serverless/src/barbe-sls-lib/consts.ts
   var TERRAFORM_EXECUTE_GET_OUTPUT = "terraform_execute_get_output";
@@ -637,7 +898,6 @@
   var container = readDatabagContainer();
   var state = BarbeState.readState();
   var outputDir = barbeOutputDir();
-  var CREATED_TF_STATE_KEY = "created_tfstate";
   var CREATED_PROJECT_NAME_KEY = "created_project_name";
   var alreadyDeployedProjectOutput = Object.entries(state[CREATED_PROJECT_NAME_KEY] || {}).map(([bagName, projectName]) => ({
     Type: "gcp_project_setup_output",
@@ -646,9 +906,11 @@
       project_name: projectName
     }
   }));
-  function gcpProjectSetupGenerateIterator(bag) {
+  exportDatabags(alreadyDeployedProjectOutput);
+  function gcpProjectSetup(bag) {
+    let pipe = pipeline([], { name: `gcp_project_setup.${bag.Name}` });
     if (!bag.Value) {
-      return [];
+      return pipe;
     }
     const [block, _] = applyDefaults(container, bag.Value);
     const dir = `gcp_project_setup_${bag.Name}`;
@@ -737,158 +999,109 @@
           }))
         );
       }
+      if (container["cr_[terraform]"]) {
+        localDatabags.push(cloudTerraform("", "", prependTfStateFileName(container["cr_[terraform]"][""][0].Value, `_gcp_project_setup_${bag.Name}`)));
+      }
       return localDatabags;
     };
-    let databags = projectSetupResource();
-    if (container["cr_[terraform]"]) {
-      databags.push(cloudTerraform("", "", prependTfStateFileName(container["cr_[terraform]"][""][0].Value, `_gcp_project_setup_${bag.Name}`)));
-    }
-    return databags;
-  }
-  function gcpProjectSetupApplyIterator(bag) {
-    if (!bag.Value) {
-      return [];
-    }
-    if (BarbeState.getObjectValue(state, CREATED_TF_STATE_KEY, bag.Name)) {
-      return [];
-    }
-    return [{
-      Type: "terraform_execute",
-      Name: `gcp_setup_${bag.Name}`,
-      Value: {
-        display_name: `Terraform apply - gcp_project_setup.${bag.Name}`,
-        mode: "apply",
-        dir: `${outputDir}/gcp_project_setup_${bag.Name}`
+    pipe.pushWithParams({ name: "resources", lifecycleSteps: ["generate"] }, () => {
+      return {
+        databags: projectSetupResource()
+      };
+    });
+    pipe.pushWithParams({ name: "tf_apply", lifecycleSteps: ["apply"] }, () => {
+      if (BarbeState.getObjectValue(state, CREATED_PROJECT_NAME_KEY, bag.Name)) {
+        return;
       }
-    }];
-  }
-  function makeEmptyExecuteDatabags() {
-    if (!container["cr_[terraform]"]) {
-      return [];
-    }
-    return emptyExecuteTemplate(container, state, GCP_PROJECT_SETUP, CREATED_TF_STATE_KEY);
-  }
-  function gcpProjectSetupApply() {
-    const results = importComponents(container, [{
-      name: "gcp_project_setup_apply",
-      url: TERRAFORM_EXECUTE_URL,
-      input: [
-        ...iterateBlocks(container, GCP_PROJECT_SETUP, gcpProjectSetupApplyIterator).flat(),
-        ...makeEmptyExecuteDatabags()
-      ]
-    }]);
-    const applyProcessResultsIterator = (bag) => {
-      if (!bag.Value) {
-        return [];
-      }
-      if (!results.terraform_execute_output[`gcp_setup_${bag.Name}`]) {
-        return [];
-      }
-      const projectName = asStr(asVal(asVal(results.terraform_execute_output[`gcp_setup_${bag.Name}`][0].Value)[0]).value);
-      let databags2 = [{
-        Type: "gcp_project_setup_output",
-        Name: bag.Name,
-        Value: {
-          project_name: projectName
-        }
+      const imports = [{
+        url: TERRAFORM_EXECUTE_URL,
+        input: [{
+          Type: "terraform_execute",
+          Name: `gcp_setup_${bag.Name}`,
+          Value: {
+            display_name: `Terraform apply - gcp_project_setup.${bag.Name}`,
+            mode: "apply",
+            dir: `${outputDir}/gcp_project_setup_${bag.Name}`
+          }
+        }]
       }];
-      if (container["cr_[terraform]"]) {
-        databags2.push(
-          BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-            [bag.Name]: prependTfStateFileName(container["cr_[terraform]"][""][0].Value, `_gcp_project_setup_${bag.Name}`)
-          }),
-          BarbeState.putInObject(CREATED_PROJECT_NAME_KEY, {
-            [bag.Name]: projectName
-          })
-        );
+      return { imports };
+    });
+    pipe.pushWithParams({ name: "save_state", lifecycleSteps: ["apply"] }, (input) => {
+      let databags = [];
+      const tfExecuteOutput = getHistoryItem(input.history, "tf_apply")?.databags;
+      if (tfExecuteOutput?.terraform_execute_output?.[`gcp_setup_${bag.Name}`]) {
+        const projectName = asStr(asVal(asVal(tfExecuteOutput.terraform_execute_output[`gcp_setup_${bag.Name}`][0].Value)[0]).value);
+        databags.push({
+          Type: "gcp_project_setup_output",
+          Name: bag.Name,
+          Value: {
+            project_name: projectName
+          }
+        });
+        if (container["cr_[terraform]"]) {
+          databags.push(
+            BarbeState.putInObject(CREATED_PROJECT_NAME_KEY, {
+              [bag.Name]: projectName
+            })
+          );
+        }
       }
-      return databags2;
-    };
-    let databags = [
-      ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_TF_STATE_KEY),
-      ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_PROJECT_NAME_KEY),
-      ...alreadyDeployedProjectOutput
-    ];
-    if (results.terraform_execute_output) {
-      databags.push(
-        ...iterateBlocks(container, GCP_PROJECT_SETUP, applyProcessResultsIterator).flat()
-      );
-    }
-    exportDatabags(databags);
+      return { databags };
+    });
+    pipe.pushWithParams({ name: "tf_destroy", lifecycleSteps: ["destroy"] }, () => {
+      const imports = [{
+        name: "gcp_project_setup_destroy",
+        url: TERRAFORM_EXECUTE_URL,
+        input: [{
+          Type: "terraform_execute",
+          Name: `gcp_destroy_${bag.Name}`,
+          Value: {
+            display_name: `Terraform destroy - gcp_project_setup.${bag.Name}`,
+            mode: "destroy",
+            dir: `${outputDir}/gcp_project_setup_${bag.Name}`
+          }
+        }]
+      }];
+      return { imports };
+    });
+    pipe.pushWithParams({ name: "delete_state", lifecycleSteps: ["destroy"] }, () => {
+      const databags = [BarbeState.deleteFromObject(CREATED_PROJECT_NAME_KEY, bag.Name)];
+      return { databags };
+    });
+    return pipe;
   }
-  function gcpProjectSetupDestroyIterator(bag) {
+  function gcpProjectSetupGetInfo(bag) {
+    let pipe = pipeline([], { name: `gcp_project_setup_get_info.${bag.Name}` });
     if (!bag.Value) {
-      return [];
-    }
-    return [{
-      Type: "terraform_execute",
-      Name: `gcp_destroy_${bag.Name}`,
-      Value: {
-        display_name: `Terraform destroy - gcp_project_setup.${bag.Name}`,
-        mode: "destroy",
-        dir: `${outputDir}/gcp_project_setup_${bag.Name}`
-      }
-    }];
-  }
-  function gcpProjectSetupDestroy() {
-    const results = importComponents(container, [{
-      name: "gcp_project_setup_destroy",
-      url: TERRAFORM_EXECUTE_URL,
-      input: [
-        ...iterateBlocks(container, GCP_PROJECT_SETUP, gcpProjectSetupDestroyIterator).flat(),
-        ...makeEmptyExecuteDatabags()
-      ]
-    }]);
-    const destroyProcessResultsIterator = (bag) => {
-      if (!bag.Value) {
-        return [];
-      }
-      return [
-        BarbeState.deleteFromObject(CREATED_TF_STATE_KEY, bag.Name),
-        BarbeState.deleteFromObject(CREATED_PROJECT_NAME_KEY, bag.Name)
-      ];
-    };
-    let databags = [
-      ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_TF_STATE_KEY),
-      ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_PROJECT_NAME_KEY),
-      //we keep that in case the calling template uses it, even tho it just got destroyed
-      ...alreadyDeployedProjectOutput,
-      ...iterateBlocks(container, GCP_PROJECT_SETUP, destroyProcessResultsIterator).flat()
-    ];
-    exportDatabags(databags);
-  }
-  function gcpProjectSetupGetInfoIterator(bag) {
-    if (!bag.Value) {
-      return [];
+      return pipe;
     }
     const [block, _] = applyDefaults(container, bag.Value);
     if (!block.name) {
       throw new Error(`gcp_project_setup_get_info block ${bag.Name} is missing a 'name' parameter`);
     }
     const name = asStr(block.name);
-    return [{
-      Type: TERRAFORM_EXECUTE_GET_OUTPUT,
-      Name: `gcp_setup_get_output_${bag.Name}`,
-      Value: {
-        display_name: `Terraform output - gcp_project_setup.${name}`,
-        dir: `${outputDir}/gcp_project_setup_${name}`
+    pipe.pushWithParams({ name: "get_info" }, () => {
+      const imports = [{
+        name: `gcp_project_setup_get_info_${barbeLifecycleStep()}`,
+        url: TERRAFORM_EXECUTE_URL,
+        input: [{
+          Type: TERRAFORM_EXECUTE_GET_OUTPUT,
+          Name: `gcp_setup_get_output_${bag.Name}`,
+          Value: {
+            display_name: `Terraform output - gcp_project_setup.${name}`,
+            dir: `${outputDir}/gcp_project_setup_${name}`
+          }
+        }]
+      }];
+      return { imports };
+    });
+    pipe.pushWithParams({ name: "export_info" }, (input) => {
+      const tfOutput = getHistoryItem(input.history, "get_info")?.databags;
+      if (!tfOutput?.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`] || !tfOutput?.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0] || !tfOutput?.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value || !asVal(tfOutput?.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value)[0]) {
+        return;
       }
-    }];
-  }
-  function getInfo() {
-    const results = importComponents(container, [{
-      name: `gcp_project_setup_get_info_${barbeLifecycleStep()}`,
-      url: TERRAFORM_EXECUTE_URL,
-      input: iterateBlocks(container, GCP_PROJECT_SETUP_GET_INFO, gcpProjectSetupGetInfoIterator).flat()
-    }]);
-    const resultsIterator = (bag) => {
-      if (!bag.Value) {
-        return [];
-      }
-      if (!results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`] || !results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0] || !results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value || !asVal(results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value)[0]) {
-        return [];
-      }
-      const projectName = asStr(asVal(asVal(results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value)[0]).value);
+      const projectName = asStr(asVal(asVal(tfOutput?.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value)[0]).value);
       let databags = [{
         Type: "gcp_project_setup_output",
         Name: bag.Name,
@@ -896,22 +1109,15 @@
           project_name: projectName
         }
       }];
-      return databags;
-    };
-    if (results.terraform_execute_output) {
-      exportDatabags(iterateBlocks(container, GCP_PROJECT_SETUP_GET_INFO, resultsIterator).flat());
-    }
+      return { databags };
+    });
+    return pipe;
   }
-  getInfo();
-  switch (barbeLifecycleStep()) {
-    case "generate":
-      exportDatabags(iterateBlocks(container, GCP_PROJECT_SETUP, gcpProjectSetupGenerateIterator).flat());
-      break;
-    case "apply":
-      gcpProjectSetupApply();
-      break;
-    case "destroy":
-      gcpProjectSetupDestroy();
-      break;
-  }
+  var pipes = [
+    ...iterateBlocks(container, GCP_PROJECT_SETUP, gcpProjectSetup),
+    ...iterateBlocks(container, GCP_PROJECT_SETUP_GET_INFO, gcpProjectSetupGetInfo),
+    autoDeleteMissingTfState(container, GCP_PROJECT_SETUP, (_, bagName) => ({ databags: [BarbeState.deleteFromObject(CREATED_PROJECT_NAME_KEY, bagName)] })),
+    autoCreateStateStore(container, GCP_PROJECT_SETUP, "gcs")
+  ];
+  executePipelineGroup(container, pipes);
 })();

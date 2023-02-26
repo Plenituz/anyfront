@@ -1,17 +1,15 @@
-import { readDatabagContainer, barbeLifecycleStep, exportDatabags, iterateBlocks, Databag, SugarCoatedDatabag, asTraversal, asFuncCall, asValArrayConst, asBlock, BarbeState, barbeOutputDir, importComponents, asVal, asStr } from '../../barbe-serverless/src/barbe-std/utils';
+import { readDatabagContainer, barbeLifecycleStep, exportDatabags, iterateBlocks, Databag, SugarCoatedDatabag, asTraversal, asFuncCall, asValArrayConst, asBlock, BarbeState, barbeOutputDir, asVal, asStr } from '../../barbe-serverless/src/barbe-std/utils';
 import { applyDefaults, preConfCloudResourceFactory } from '../../barbe-serverless/src/barbe-sls-lib/lib';
 import { GCP_PROJECT_SETUP, GCP_PROJECT_SETUP_GET_INFO, TERRAFORM_EXECUTE_URL } from './anyfront-lib/consts';
-import { emptyExecuteTemplate, prependTfStateFileName, emptyExecutePostProcess } from './anyfront-lib/lib';
+import { prependTfStateFileName, autoCreateStateStore, autoDeleteMissingTfState } from './anyfront-lib/lib';
 import { TERRAFORM_EXECUTE_GET_OUTPUT } from '../../barbe-serverless/src/barbe-sls-lib/consts';
+import { executePipelineGroup, pipeline, Pipeline, getHistoryItem } from './anyfront-lib/pipeline';
 
 const container = readDatabagContainer()
 const state = BarbeState.readState()
 const outputDir = barbeOutputDir()
-const CREATED_TF_STATE_KEY = 'created_tfstate'
 const CREATED_PROJECT_NAME_KEY = 'created_project_name'
 
-//this will include the gcp_project_setups that are not in the template but not deleted by empty apply yet
-//which is ok, it's just the first run after you delete the gcp_project_setup block basically
 const alreadyDeployedProjectOutput = Object.entries(state[CREATED_PROJECT_NAME_KEY] || {})
     .map(([bagName, projectName]) => ({
         Type: 'gcp_project_setup_output',
@@ -20,11 +18,12 @@ const alreadyDeployedProjectOutput = Object.entries(state[CREATED_PROJECT_NAME_K
             project_name: projectName
         }
     }))
+exportDatabags(alreadyDeployedProjectOutput)
 
-
-function gcpProjectSetupGenerateIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] {
+function gcpProjectSetup(bag: Databag): Pipeline {
+    let pipe = pipeline([], { name: `gcp_project_setup.${bag.Name}` })
     if(!bag.Value) {
-        return []
+        return pipe
     }
     const [block, _] = applyDefaults(container, bag.Value);
 
@@ -118,179 +117,118 @@ function gcpProjectSetupGenerateIterator(bag: Databag): (Databag | SugarCoatedDa
                 )),
             )
         }
+        if(container['cr_[terraform]']) {
+            localDatabags.push(cloudTerraform('', '', prependTfStateFileName(container['cr_[terraform]'][''][0].Value!, `_gcp_project_setup_${bag.Name}`)))
+        }
         return localDatabags
     }
 
-    let databags: SugarCoatedDatabag[] = projectSetupResource()
-    if(container['cr_[terraform]']) {
-        databags.push(cloudTerraform('', '', prependTfStateFileName(container['cr_[terraform]'][''][0].Value!, `_gcp_project_setup_${bag.Name}`)))
-    }
-    return databags
-}
-
-function gcpProjectSetupApplyIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] {
-    if(!bag.Value) {
-        return []
-    }
-    if(BarbeState.getObjectValue(state, CREATED_TF_STATE_KEY, bag.Name)) {
-        // already created, skip. Note: only skip in apply, generate should still happen
-        return []
-    }
-    return [{
-        Type: 'terraform_execute',
-        Name: `gcp_setup_${bag.Name}`,
-        Value: {
-            display_name: `Terraform apply - gcp_project_setup.${bag.Name}`,
-            mode: 'apply',
-            dir: `${outputDir}/gcp_project_setup_${bag.Name}`
+    pipe.pushWithParams({ name: 'resources', lifecycleSteps: ['generate'] }, () => {
+        return {
+            databags: projectSetupResource()
         }
-    }]
-}
-
-function makeEmptyExecuteDatabags(): SugarCoatedDatabag[] {
-    if(!container['cr_[terraform]']) {
-        return []
-    }
-    //only add empty execute if we have a terraform block
-    //because this component gets called multiple times with no real input
-    //and we dont want to delete the gcp_project_setup everytime that happens
-    return emptyExecuteTemplate(container, state, GCP_PROJECT_SETUP, CREATED_TF_STATE_KEY)
-}
-
-function gcpProjectSetupApply() {
-    const results = importComponents(container, [{
-        name: 'gcp_project_setup_apply',
-        url: TERRAFORM_EXECUTE_URL,
-        input: [
-            ...iterateBlocks(container, GCP_PROJECT_SETUP, gcpProjectSetupApplyIterator).flat(),
-            ...makeEmptyExecuteDatabags()
-        ]
-    }])
-
-    const applyProcessResultsIterator = (bag: Databag): (Databag | SugarCoatedDatabag)[] => {
-        if(!bag.Value) {
-            return []
+    })
+    pipe.pushWithParams({ name: 'tf_apply', lifecycleSteps: ['apply'] }, () => {
+        if(BarbeState.getObjectValue(state, CREATED_PROJECT_NAME_KEY, bag.Name)) {
+            // Note: only skip in apply, generate should still happen
+            return
         }
-        if(!results.terraform_execute_output[`gcp_setup_${bag.Name}`]) {
-            return []
-        }
-        const projectName = asStr(asVal(asVal(results.terraform_execute_output[`gcp_setup_${bag.Name}`][0].Value!)[0]).value)
-        let databags: SugarCoatedDatabag[] = [{
-            Type: 'gcp_project_setup_output',
-            Name: bag.Name,
-            Value: {
-                project_name: projectName
-            }
+        const imports = [{
+            url: TERRAFORM_EXECUTE_URL,
+            input: [{
+                Type: 'terraform_execute',
+                Name: `gcp_setup_${bag.Name}`,
+                Value: {
+                    display_name: `Terraform apply - gcp_project_setup.${bag.Name}`,
+                    mode: 'apply',
+                    dir: `${outputDir}/gcp_project_setup_${bag.Name}`
+                }
+            }]
         }]
-        if(container['cr_[terraform]']) {
-            databags.push(
-                BarbeState.putInObject(CREATED_TF_STATE_KEY, {
-                    [bag.Name]: prependTfStateFileName(container['cr_[terraform]'][''][0].Value!, `_gcp_project_setup_${bag.Name}`)
-                }),
-                BarbeState.putInObject(CREATED_PROJECT_NAME_KEY, {
-                    [bag.Name]: projectName
-                }),
-            )
+        return { imports }
+    })
+    pipe.pushWithParams({ name: 'save_state', lifecycleSteps: ['apply'] }, (input) => {
+        //this will include the gcp_project_setups that are not in the template but not deleted by empty apply yet
+        //which is ok, it's just the first run after you delete the gcp_project_setup block basically
+        let databags: SugarCoatedDatabag[] = []
+        const tfExecuteOutput = getHistoryItem(input.history, 'tf_apply')?.databags
+        if(tfExecuteOutput?.terraform_execute_output?.[`gcp_setup_${bag.Name}`]) {
+            const projectName = asStr(asVal(asVal(tfExecuteOutput.terraform_execute_output[`gcp_setup_${bag.Name}`][0].Value!)[0]).value)
+            databags.push({
+                Type: 'gcp_project_setup_output',
+                Name: bag.Name,
+                Value: {
+                    project_name: projectName
+                }
+            })
+            if(container['cr_[terraform]']) {
+                databags.push(
+                    BarbeState.putInObject(CREATED_PROJECT_NAME_KEY, {
+                        [bag.Name]: projectName
+                    }),
+                )
+            }
         }
-        return databags
-    }
-
-    let databags: SugarCoatedDatabag[] = [
-        ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_TF_STATE_KEY),
-        ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_PROJECT_NAME_KEY),
-        ...alreadyDeployedProjectOutput,
-    ]
-    if(results.terraform_execute_output) {
-        databags.push(
-            ...iterateBlocks(container, GCP_PROJECT_SETUP, applyProcessResultsIterator).flat(),
-        )
-    }
-    exportDatabags(databags)
+        return { databags }
+    })
+    pipe.pushWithParams({ name: 'tf_destroy', lifecycleSteps: ['destroy'] }, () => {
+        const imports = [{
+            name: 'gcp_project_setup_destroy',
+            url: TERRAFORM_EXECUTE_URL,
+            input: [{
+                Type: 'terraform_execute',
+                Name: `gcp_destroy_${bag.Name}`,
+                Value: {
+                    display_name: `Terraform destroy - gcp_project_setup.${bag.Name}`,
+                    mode: 'destroy',
+                    dir: `${outputDir}/gcp_project_setup_${bag.Name}`
+                }
+            }]
+        }]
+        return { imports }
+    })
+    pipe.pushWithParams({ name: 'delete_state', lifecycleSteps: ['destroy'] }, () => {
+        const databags = [BarbeState.deleteFromObject(CREATED_PROJECT_NAME_KEY, bag.Name)]
+        return { databags }
+    })
+    return pipe
 }
 
-function gcpProjectSetupDestroyIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] {
+function gcpProjectSetupGetInfo(bag: Databag): Pipeline {
+    let pipe = pipeline([], { name: `gcp_project_setup_get_info.${bag.Name}` })
     if(!bag.Value) {
-        return []
-    }
-
-    return [{
-        Type: 'terraform_execute',
-        Name: `gcp_destroy_${bag.Name}`,
-        Value: {
-            display_name: `Terraform destroy - gcp_project_setup.${bag.Name}`,
-            mode: 'destroy',
-            dir: `${outputDir}/gcp_project_setup_${bag.Name}`
-        }
-    }]
-}
-
-function gcpProjectSetupDestroy() {
-    const results = importComponents(container, [{
-        name: 'gcp_project_setup_destroy',
-        url: TERRAFORM_EXECUTE_URL,
-        input: [
-            ...iterateBlocks(container, GCP_PROJECT_SETUP, gcpProjectSetupDestroyIterator).flat(),
-            ...makeEmptyExecuteDatabags()
-        ]
-    }])
-
-    const destroyProcessResultsIterator = (bag: Databag): (Databag | SugarCoatedDatabag)[] => {
-        if(!bag.Value) {
-            return []
-        }
-        return [
-            BarbeState.deleteFromObject(CREATED_TF_STATE_KEY, bag.Name),
-            BarbeState.deleteFromObject(CREATED_PROJECT_NAME_KEY, bag.Name),
-        ]
-    }
-
-    let databags: SugarCoatedDatabag[] = [
-        ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_TF_STATE_KEY),
-        ...emptyExecutePostProcess(container, results, GCP_PROJECT_SETUP, CREATED_PROJECT_NAME_KEY),
-        //we keep that in case the calling template uses it, even tho it just got destroyed
-        ...alreadyDeployedProjectOutput,
-        ...iterateBlocks(container, GCP_PROJECT_SETUP, destroyProcessResultsIterator).flat(),
-    ]
-    exportDatabags(databags)
-}
-
-function gcpProjectSetupGetInfoIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] {
-    if(!bag.Value) {
-        return []
+        return pipe
     }
     const [block, _] = applyDefaults(container, bag.Value);
     if(!block.name) {
         throw new Error(`gcp_project_setup_get_info block ${bag.Name} is missing a 'name' parameter`)
     }
     const name = asStr(block.name)
-    return [{
-        Type: TERRAFORM_EXECUTE_GET_OUTPUT,
-        Name: `gcp_setup_get_output_${bag.Name}`,
-        Value: {
-            display_name: `Terraform output - gcp_project_setup.${name}`,
-            dir: `${outputDir}/gcp_project_setup_${name}`
+    
+    pipe.pushWithParams({ name: 'get_info' }, () => {
+        const imports = [{
+            name: `gcp_project_setup_get_info_${barbeLifecycleStep()}`,
+            url: TERRAFORM_EXECUTE_URL,
+            input: [{
+                Type: TERRAFORM_EXECUTE_GET_OUTPUT,
+                Name: `gcp_setup_get_output_${bag.Name}`,
+                Value: {
+                    display_name: `Terraform output - gcp_project_setup.${name}`,
+                    dir: `${outputDir}/gcp_project_setup_${name}`
+                }
+            }]
+        }]
+        return { imports }
+    })
+    pipe.pushWithParams({ name: 'export_info' }, (input) => {
+        const tfOutput = getHistoryItem(input.history, 'get_info')?.databags
+        if(!tfOutput?.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`] || 
+            !tfOutput?.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0] ||
+            !tfOutput?.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value ||
+            !asVal(tfOutput?.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value!)[0]) {
+            return
         }
-    }]
-}
-
-function getInfo() {
-    const results = importComponents(container, [{
-        name: `gcp_project_setup_get_info_${barbeLifecycleStep()}`,
-        url: TERRAFORM_EXECUTE_URL,
-        input: iterateBlocks(container, GCP_PROJECT_SETUP_GET_INFO, gcpProjectSetupGetInfoIterator).flat()
-    }])
-
-    const resultsIterator = (bag: Databag): (Databag | SugarCoatedDatabag)[] => {
-        if(!bag.Value) {
-            return []
-        }
-        if(!results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`] || 
-            !results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0] ||
-            !results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value ||
-            !asVal(results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value!)[0]) {
-            return []
-        }
-        const projectName = asStr(asVal(asVal(results.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value!)[0]).value)
+        const projectName = asStr(asVal(asVal(tfOutput?.terraform_execute_output[`gcp_setup_get_output_${bag.Name}`][0].Value!)[0]).value)
         let databags: SugarCoatedDatabag[] = [{
             Type: 'gcp_project_setup_output',
             Name: bag.Name,
@@ -298,24 +236,15 @@ function getInfo() {
                 project_name: projectName
             }
         }]
-        return databags
-    }
-
-    if(results.terraform_execute_output) {
-        exportDatabags(iterateBlocks(container, GCP_PROJECT_SETUP_GET_INFO, resultsIterator).flat())
-    }
+        return { databags }
+    })
+    return pipe
 }
 
-getInfo()
-switch(barbeLifecycleStep()) {
-    case 'generate':
-        exportDatabags(iterateBlocks(container, GCP_PROJECT_SETUP, gcpProjectSetupGenerateIterator).flat())
-        break
-    case 'apply':
-        gcpProjectSetupApply()
-        break
-    case 'destroy':
-        gcpProjectSetupDestroy()
-        break
-}
-
+const pipes = [
+    ...iterateBlocks(container, GCP_PROJECT_SETUP, gcpProjectSetup),
+    ...iterateBlocks(container, GCP_PROJECT_SETUP_GET_INFO, gcpProjectSetupGetInfo),
+    autoDeleteMissingTfState(container, GCP_PROJECT_SETUP, (_, bagName) => ({ databags: [BarbeState.deleteFromObject(CREATED_PROJECT_NAME_KEY, bagName)] }),),
+    autoCreateStateStore(container, GCP_PROJECT_SETUP, 'gcs')
+]
+executePipelineGroup(container, pipes)

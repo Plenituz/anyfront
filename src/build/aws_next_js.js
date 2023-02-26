@@ -649,6 +649,29 @@
     }
     return output;
   }
+  function addToStepOutput(original, ...outputs) {
+    for (const output of outputs) {
+      if (output.imports) {
+        if (!original.imports) {
+          original.imports = [];
+        }
+        original.imports.push(...output.imports);
+      }
+      if (output.databags) {
+        if (!original.databags) {
+          original.databags = [];
+        }
+        original.databags.push(...output.databags);
+      }
+      if (output.transforms) {
+        if (!original.transforms) {
+          original.transforms = [];
+        }
+        original.transforms.push(...output.transforms);
+      }
+    }
+    return original;
+  }
   function executePipelineGroup(container2, pipelines) {
     const lifecycleStep = barbeLifecycleStep();
     const maxStep = pipelines.map((p) => p.steps.length).reduce((a, b) => Math.max(a, b), 0);
@@ -798,7 +821,7 @@
     }
     return false;
   }
-  function autoDeleteMissingTfState(container2, bagType) {
+  function autoDeleteMissingTfState(container2, bagType, onDelete) {
     return autoDeleteMissing2(container2, {
       bagType,
       createSavable: (bagType2, bagName) => {
@@ -841,7 +864,11 @@
             }
           }]
         }];
-        return { imports };
+        let output = { imports };
+        if (onDelete) {
+          addToStepOutput(output, onDelete(bagType2, bagName, savedValue));
+        }
+        return output;
       }
     });
   }
@@ -897,7 +924,7 @@
     applyPipe.pushWithParams({ name: "cleanup_state_destroy", lifecycleSteps: ["post_destroy"] }, () => {
       const databags = [];
       for (const [bagName, savedValue] of Object.entries(state[STATE_KEY_NAME] || {})) {
-        if (!savedValue || bagName === "Meta") {
+        if (bagName === "Meta") {
           continue;
         }
         databags.push(BarbeState.deleteFromObject(STATE_KEY_NAME, bagName));

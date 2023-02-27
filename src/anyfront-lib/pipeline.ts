@@ -14,6 +14,16 @@ export function mergeDatabagContainers(...containers: DatabagContainer[]): Datab
     return output
 }
 
+export function databagArrayToContainer(array: SugarCoatedDatabag[]): DatabagContainer {
+    let output: DatabagContainer = {}
+    for(const bag of array) {
+        output[bag.Type] = output[bag.Type] || {}
+        output[bag.Type][bag.Name] = output[bag.Type][bag.Name] || []
+        output[bag.Type][bag.Name].push(bag)
+    }
+    return output
+}
+
 //modifies the original, but also returns it for convenience
 export function addToStepOutput(original: StepOutput, ...outputs: StepOutput[]): StepOutput {
     for(const output of outputs) {
@@ -106,6 +116,7 @@ export function executePipelineGroup(container: DatabagContainer, pipelines: Pip
         }
         if(stepDatabags.length > 0) {
             exportDatabags(stepDatabags)
+            stepResults = mergeDatabagContainers(stepResults, databagArrayToContainer(stepDatabags));
         }
         if(IS_VERBOSE) {
             console.log(`step ${i} output:`, JSON.stringify(stepResults))
@@ -115,6 +126,12 @@ export function executePipelineGroup(container: DatabagContainer, pipelines: Pip
             stepNames
         });
         previousStepResult = stepResults;
+        for(let pipeline of pipelines) {
+            pipeline.mostRecentInput = {
+                previousStepResult,
+                history
+            }
+        }
     }
 }
 
@@ -136,10 +153,12 @@ export type Step = {
 }
 export type Pipeline = {
     name?: string
+    mostRecentInput?: StepInput
     steps: Step[]
 }
 
 export type PipelineWithFuncs = Pipeline & {
+    runAfter(other: Pipeline): void
     merge(...steps: Step[]): void
     pushWithParams(params: Omit<Step, 'f'>, f: (input: StepInput) => StepOutput | void): void
     push(f: (input: StepInput) => StepOutput | void): void
@@ -173,6 +192,12 @@ export function pipeline(steps: Step[], params?: Omit<Pipeline, 'steps'>): Pipel
         },
         merge(...steps: Step[]) {
             this.steps.push(...steps)
+        },
+        runAfter(other: Pipeline) {
+            this.steps = [
+                ...Array.from({length: other.steps.length}, () => step(() => {}, { name: `padding_${other.name || ''}` })),
+                ...this.steps
+            ]
         }
     }
 }

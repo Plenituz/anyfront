@@ -15,6 +15,7 @@ static_hosting "docusaurus" {
     }
 
     domain {
+        # the domain name you want the app to be under
         name = "docusaurus1.anyfront.dev"
     }
 }

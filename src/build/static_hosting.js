@@ -500,6 +500,18 @@
       throw new Error(resp.error);
     }
   }
+  function applyTransformers(input) {
+    const resp = barbeRpcCall({
+      method: "transformContainer",
+      params: [{
+        databags: input
+      }]
+    });
+    if (isFailure(resp)) {
+      throw new Error(resp.error);
+    }
+    return resp.result;
+  }
   function importComponents(container2, components) {
     let barbeImportComponent = [];
     for (const component of components) {
@@ -663,6 +675,147 @@
 
   // static_hosting.ts
   var import_md5 = __toESM(require_md5());
+
+  // anyfront-lib/pipeline.ts
+  function mergeDatabagContainers(...containers) {
+    let output = {};
+    for (const container2 of containers) {
+      for (const [blockType, block] of Object.entries(container2)) {
+        output[blockType] = output[blockType] || {};
+        for (const [bagName, bag] of Object.entries(block)) {
+          output[blockType][bagName] = output[blockType][bagName] || [];
+          output[blockType][bagName].push(...bag);
+        }
+      }
+    }
+    return output;
+  }
+  function databagArrayToContainer(array) {
+    let output = {};
+    for (const bag of array) {
+      output[bag.Type] = output[bag.Type] || {};
+      output[bag.Type][bag.Name] = output[bag.Type][bag.Name] || [];
+      output[bag.Type][bag.Name].push(bag);
+    }
+    return output;
+  }
+  function executePipelineGroup(container2, pipelines) {
+    const lifecycleStep = barbeLifecycleStep();
+    const maxStep = pipelines.map((p) => p.steps.length).reduce((a, b) => Math.max(a, b), 0);
+    let previousStepResult = {};
+    let history = [];
+    for (let i = 0; i < maxStep; i++) {
+      let stepResults = {};
+      let stepImports = [];
+      let stepTransforms = [];
+      let stepDatabags = [];
+      let stepNames = [];
+      for (let pipeline2 of pipelines) {
+        if (i >= pipeline2.steps.length) {
+          continue;
+        }
+        const stepMeta = pipeline2.steps[i];
+        if (stepMeta.name) {
+          stepNames.push(stepMeta.name);
+        }
+        if (stepMeta.lifecycleSteps && stepMeta.lifecycleSteps.length > 0) {
+          if (!stepMeta.lifecycleSteps.includes(lifecycleStep)) {
+            if (IS_VERBOSE) {
+              console.log(`${pipeline2.name}: skipping step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} (${lifecycleStep} not in [${stepMeta.lifecycleSteps.join(", ")}]`);
+            }
+            continue;
+          }
+        }
+        if (IS_VERBOSE) {
+          console.log(`${pipeline2.name}: running step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""}`);
+          console.log(`step ${i} input:`, JSON.stringify(previousStepResult));
+        }
+        let stepRequests = stepMeta.f({
+          previousStepResult,
+          history
+        });
+        if (IS_VERBOSE) {
+          console.log(`${pipeline2.name}: step ${i}${stepMeta.name ? ` (${stepMeta.name})` : ""} requests:`, JSON.stringify(stepRequests));
+        }
+        if (!stepRequests) {
+          continue;
+        }
+        if (stepRequests.imports) {
+          stepImports.push(...stepRequests.imports);
+        }
+        if (stepRequests.transforms) {
+          stepTransforms.push(...stepRequests.transforms);
+        }
+        if (stepRequests.databags) {
+          stepDatabags.push(...stepRequests.databags);
+        }
+      }
+      if (stepImports.length > 0) {
+        const importsResults = importComponents(container2, stepImports);
+        stepResults = mergeDatabagContainers(stepResults, importsResults);
+      }
+      if (stepTransforms.length > 0) {
+        const transformResults = applyTransformers(stepTransforms);
+        stepResults = mergeDatabagContainers(stepResults, transformResults);
+      }
+      if (stepDatabags.length > 0) {
+        exportDatabags(stepDatabags);
+        stepResults = mergeDatabagContainers(stepResults, databagArrayToContainer(stepDatabags));
+      }
+      if (IS_VERBOSE) {
+        console.log(`step ${i} output:`, JSON.stringify(stepResults));
+      }
+      history.push({
+        databags: stepResults,
+        stepNames
+      });
+      previousStepResult = stepResults;
+      for (let pipeline2 of pipelines) {
+        pipeline2.mostRecentInput = {
+          previousStepResult,
+          history
+        };
+      }
+    }
+  }
+  function getHistoryItem(history, stepName) {
+    for (const item of history) {
+      if (item.stepNames.includes(stepName)) {
+        return item;
+      }
+    }
+    return null;
+  }
+  function step(f, params) {
+    return {
+      ...params,
+      f
+    };
+  }
+  function pipeline(steps, params) {
+    return {
+      ...params,
+      steps,
+      pushWithParams(params2, f) {
+        this.steps.push(step(f, params2));
+      },
+      push(f) {
+        this.steps.push(step(f));
+      },
+      merge(...steps2) {
+        this.steps.push(...steps2);
+      },
+      runAfter(other) {
+        this.steps = [
+          ...Array.from({ length: other.steps.length }, () => step(() => {
+          }, { name: `padding_${other.name || ""}` })),
+          ...this.steps
+        ];
+      }
+    };
+  }
+
+  // static_hosting.ts
   var container = readDatabagContainer();
   function iterateBlocksPerPlatform(container2, iteratorGcp, iteratorAws) {
     return iterateBlocks(container2, STATIC_HOSTING, (bag) => {
@@ -678,124 +831,6 @@
       }
     });
   }
-  function makeSubDatabags(container2, buildOutputDirs) {
-    let gcpStaticHostings = [];
-    let awsStaticHostings = [];
-    const gcpIterator = (bag, block, namePrefix) => {
-      const hash = computeBagBuildHash(bag);
-      const buildOutputDir = buildOutputDirs[hash];
-      if (!buildOutputDir && barbeLifecycleStep() !== "destroy") {
-        throw new Error(`static_hosting.${bag.Name} has no build output dir, this is a bug, please report it`);
-      }
-      const dotGcpProject = compileBlockParam(block, "google_cloud_project");
-      const dotDomain = compileBlockParam(block, "domain");
-      gcpStaticHostings.push({
-        Type: GCP_CLOUDRUN_STATIC_HOSTING,
-        Name: bag.Name,
-        Value: {
-          name_prefix: [`${bag.Name}-`],
-          root_object: block.root_object,
-          region: block.region || "us-central1",
-          project_id: dotGcpProject.project_id || block.google_cloud_project_id,
-          project_name: dotGcpProject.project_name || bag.Name,
-          organization_id: dotGcpProject.organization_id,
-          organization_domain: dotGcpProject.organization_domain,
-          billing_account_name: dotGcpProject.billing_account_name,
-          billing_account_id: dotGcpProject.billing_account_id,
-          //gcp requires the end dot
-          domain: dotDomain.name ? appendToTemplate(dotDomain.name, ["."]) : void 0,
-          dns_zone: dotDomain.zone,
-          dns_zone_project: dotDomain.zone_project,
-          build_dir: buildOutputDir
-        }
-      });
-    };
-    const awsIterator = (bag, block, namePrefix) => {
-      const hash = computeBagBuildHash(bag);
-      const buildOutputDir = buildOutputDirs[hash];
-      if (!buildOutputDir && barbeLifecycleStep() !== "destroy") {
-        throw new Error(`static_hosting.${bag.Name} has no build output dir, this is a bug, please report it`);
-      }
-      const dotDomain = compileBlockParam(block, "domain");
-      awsStaticHostings.push({
-        Type: AWS_CLOUDFRONT_STATIC_HOSTING,
-        Name: bag.Name,
-        Value: {
-          name_prefix: [`${bag.Name}-`],
-          root_object: block.root_object,
-          region: block.region || os.getenv("AWS_REGION") || "us-east-1",
-          build_dir: buildOutputDir,
-          domain: asBlock([{
-            certificate_domain_to_create: dotDomain.name,
-            ...dotDomain
-          }])
-        }
-      });
-    };
-    iterateBlocksPerPlatform(container2, gcpIterator, awsIterator);
-    return { gcpStaticHostings, awsStaticHostings };
-  }
-  function makeSubImports(container2, buildOutputDirs) {
-    const { gcpStaticHostings, awsStaticHostings } = makeSubDatabags(container2, buildOutputDirs);
-    let imports = [];
-    if (gcpStaticHostings.length > 0) {
-      imports.push({
-        name: `static_hosting_gcp_${barbeLifecycleStep()}`,
-        url: GCP_CLOUDRUN_STATIC_HOSTING_URL,
-        copyFromContainer: ["default", "global_default", "cr_[terraform]"],
-        input: gcpStaticHostings
-      });
-    }
-    if (awsStaticHostings.length > 0) {
-      imports.push({
-        name: `static_hosting_aws_${barbeLifecycleStep()}`,
-        url: AWS_CLOUDFRONT_STATIC_HOSTING_URL,
-        copyFromContainer: ["default", "global_default", "cr_[terraform]"],
-        input: awsStaticHostings
-      });
-    }
-    return imports;
-  }
-  function preGenerate() {
-    if (container.state_store) {
-      return;
-    }
-    let gcpCount = 0;
-    let awsCount = 0;
-    const gcpIterator = (bag, block, namePrefix) => {
-      const dotGcpProject = compileBlockParam(block, "google_cloud_project");
-      gcpCount++;
-      return {
-        Type: "state_store",
-        Name: "",
-        Value: {
-          name_prefix: [`${bag.Name}-`],
-          gcs: asBlock([{
-            project_id: dotGcpProject.project_id || block.google_cloud_project_id
-          }])
-        }
-      };
-    };
-    const awsIterator = (bag, block, namePrefix) => {
-      awsCount++;
-      return {
-        Type: "state_store",
-        Name: "",
-        Value: {
-          name_prefix: [`${bag.Name}-`],
-          s3: asBlock([{}])
-        }
-      };
-    };
-    const databags = iterateBlocksPerPlatform(container, gcpIterator, awsIterator);
-    if (gcpCount > 1) {
-      throw new Error("more than 1 static_hosting block with platform 'gcp' detected without a state_store block declared, this would risk loosing your terraform/barbe state. To fix this you can explicitely declare a state_store block: `state_store { gcs { ... } }`. See https://github.com/Plenituz/barbe-serverless/blob/main/docs/references/state_store.md");
-    }
-    if (awsCount > 1) {
-      throw new Error("more than 1 static_hosting block with platform 'aws' detected without a state_store block declared, this would risk loosing your terraform/barbe state. To fix this you can explicitely declare a state_store block: `state_store { s3 { ... } }`. See https://github.com/Plenituz/barbe-serverless/blob/main/docs/references/state_store.md");
-    }
-    exportDatabags(databags);
-  }
   function computeBagBuildHash(bag) {
     const [block, _] = applyDefaults(container, bag.Value);
     const dotBuild = compileBlockParam(block, "build");
@@ -810,7 +845,66 @@
         ${Object.entries(dotEnvironment).map(([k, v]) => `${k}:${JSON.stringify(asStr(v))}`).join(",")}
     `);
   }
-  function generate() {
+  function autoCreateMultiplatformStateStore() {
+    if (container.state_store) {
+      return;
+    }
+    let gcpCount2 = 0;
+    let awsCount2 = 0;
+    const gcpIterator = (bag, block, namePrefix) => {
+      const dotGcpProject = compileBlockParam(block, "google_cloud_project");
+      gcpCount2++;
+      return {
+        Type: "state_store",
+        Name: "",
+        Value: {
+          name_prefix: [`${bag.Name}-`],
+          gcs: asBlock([{
+            project_id: dotGcpProject.project_id || block.google_cloud_project_id || block.project_id
+          }])
+        }
+      };
+    };
+    const awsIterator = (bag, block, namePrefix) => {
+      awsCount2++;
+      return {
+        Type: "state_store",
+        Name: "",
+        Value: {
+          name_prefix: [`${bag.Name}-`],
+          s3: asBlock([{}])
+        }
+      };
+    };
+    const databags = iterateBlocksPerPlatform(container, gcpIterator, awsIterator);
+    if (gcpCount2 > 1) {
+      throw new Error("more than 1 static_hosting block with platform 'gcp' detected without a state_store block declared, this would risk loosing your terraform/barbe state. To fix this you can explicitely declare a state_store block: `state_store { gcs { ... } }`. See https://github.com/Plenituz/barbe-serverless/blob/main/docs/references/state_store.md");
+    }
+    if (awsCount2 > 1) {
+      throw new Error("more than 1 static_hosting block with platform 'aws' detected without a state_store block declared, this would risk loosing your terraform/barbe state. To fix this you can explicitely declare a state_store block: `state_store { s3 { ... } }`. See https://github.com/Plenituz/barbe-serverless/blob/main/docs/references/state_store.md");
+    }
+    if (awsCount2 + gcpCount2 > 0) {
+      throw new Error("more than 1 static_hosting block with platform 'aws' and 'gcp' detected without a state_store block declared, this would risk loosing your terraform/barbe state. To fix this you can explicitely declare a state_store block: `state_store { s3 { ... } }`. See https://github.com/Plenituz/barbe-serverless/blob/main/docs/references/state_store.md");
+    }
+    exportDatabags(databags);
+  }
+  function retrieveBuildOuputDirMap() {
+    if (barbeLifecycleStep() === "generate") {
+      const buildOutputDirs2 = getHistoryItem(buildPipeline.mostRecentInput?.history || [], "builds_output")?.databags;
+      if (!buildOutputDirs2?.static_hosting_build_dir_map?.[""]?.[0]?.Value) {
+        return void 0;
+      }
+      return buildOutputDirs2?.static_hosting_build_dir_map?.[""]?.[0]?.Value;
+    }
+    const tmp = container.static_hosting_build_dir_map?.[""]?.[0]?.Value;
+    if (!tmp) {
+      return void 0;
+    }
+    let buildOutputDirs = asVal(tmp);
+    Object.keys(buildOutputDirs).forEach((key) => buildOutputDirs[key] = asStr(buildOutputDirs[key]));
+    return buildOutputDirs;
+  }
+  function buildFrontendPipeline() {
     const uniqueBagAndHashes = uniq(
       iterateBlocks(container, STATIC_HOSTING, (bag) => ({ hash: computeBagBuildHash(bag), bag })),
       (x) => x.hash
@@ -841,52 +935,154 @@
       });
     }
     if (frontEndBuildReqs.length === 0) {
-      return;
+      return pipeline([]);
     }
-    const frontendBuildResults = importComponents(container, [{
-      name: "static_hosting_generate",
-      url: FRONTEND_BUILD_URL,
-      input: frontEndBuildReqs
-    }]);
-    iterateBlocks(frontendBuildResults, "frontend_build_output", (bag) => buildOutputDirs[bag.Name] = asStr(bag.Value));
-    if (Object.keys(buildOutputDirs).length === 0) {
-      return;
-    }
-    const imports = makeSubImports(container, buildOutputDirs);
-    if (imports.length > 0) {
-      exportDatabags(importComponents(container, imports));
-    }
-    exportDatabags([{
-      Type: "static_hosting_build_dir_map",
-      Name: "",
-      Value: buildOutputDirs
-    }]);
+    return pipeline([
+      step(() => {
+        return {
+          imports: [{
+            url: FRONTEND_BUILD_URL,
+            input: frontEndBuildReqs
+          }]
+        };
+      }, { name: "builds", lifecycleSteps: ["generate"] }),
+      step((input) => {
+        const frontendBuildResults = input.previousStepResult;
+        iterateBlocks(frontendBuildResults, "frontend_build_output", (bag) => buildOutputDirs[bag.Name] = asStr(bag.Value));
+        const databags = [{
+          Type: "static_hosting_build_dir_map",
+          Name: "",
+          Value: buildOutputDirs
+        }];
+        return { databags };
+      }, { name: "builds_output", lifecycleSteps: ["generate"] })
+    ], { name: "static_hosting_frontend_builds" });
   }
-  function relayToSubComponents() {
-    const tmp = container.static_hosting_build_dir_map?.[""]?.[0]?.Value;
-    if (!tmp) {
-      return;
-    }
-    let buildOutputDirs = asVal(tmp);
-    Object.keys(buildOutputDirs).forEach((key) => buildOutputDirs[key] = asStr(buildOutputDirs[key]));
-    const imports = makeSubImports(container, buildOutputDirs);
-    if (imports.length > 0) {
-      importComponents(container, imports);
-    }
+  function staticHostingGcp(bag, block, namePrefix) {
+    let pipe = pipeline([], { name: `static_hosting[gcp].${bag.Name}` });
+    pipe.runAfter(buildPipeline);
+    pipe.pushWithParams({ name: "import_gcp" }, () => {
+      const buildOutputDirs = retrieveBuildOuputDirMap();
+      if (!buildOutputDirs) {
+        return;
+      }
+      const hash = computeBagBuildHash(bag);
+      const buildOutputDir = buildOutputDirs[hash];
+      if (!buildOutputDir) {
+        return;
+      }
+      const dotGcpProject = compileBlockParam(block, "google_cloud_project");
+      const dotDomain = compileBlockParam(block, "domain");
+      const gcpStaticHosting = {
+        Type: GCP_CLOUDRUN_STATIC_HOSTING,
+        Name: bag.Name,
+        Value: {
+          name_prefix: [`${bag.Name}-`],
+          root_object: block.root_object,
+          region: block.region || "us-central1",
+          project_id: dotGcpProject.project_id || block.google_cloud_project_id || block.project_id,
+          project_name: dotGcpProject.project_name || bag.Name,
+          organization_id: dotGcpProject.organization_id,
+          organization_domain: dotGcpProject.organization_domain,
+          billing_account_name: dotGcpProject.billing_account_name,
+          billing_account_id: dotGcpProject.billing_account_id,
+          //gcp requires the end dot
+          domain: dotDomain.name ? appendToTemplate(dotDomain.name, ["."]) : void 0,
+          dns_zone: dotDomain.zone,
+          dns_zone_project: dotDomain.zone_project,
+          build_dir: buildOutputDir
+        }
+      };
+      const imports = [{
+        url: GCP_CLOUDRUN_STATIC_HOSTING_URL,
+        copyFromContainer: ["default", "global_default", "cr_[terraform]"],
+        input: [gcpStaticHosting]
+      }];
+      return { imports };
+    });
+    pipe.pushWithParams({ name: "export_results" }, (input) => {
+      return {
+        databags: iterateAllBlocks(input.previousStepResult, (d) => d)
+      };
+    });
+    return pipe;
   }
-  switch (barbeLifecycleStep()) {
-    case "pre_generate":
-      preGenerate();
-      break;
-    case "generate":
-    case "post_generate":
-      generate();
-      break;
-    case "apply":
-    case "destroy":
-      relayToSubComponents();
-      break;
+  function staticHostingAws(bag, block, namePrefix) {
+    let pipe = pipeline([], { name: `static_hosting[aws].${bag.Name}` });
+    pipe.runAfter(buildPipeline);
+    pipe.pushWithParams({ name: "import_aws" }, () => {
+      const buildOutputDirs = retrieveBuildOuputDirMap();
+      if (!buildOutputDirs) {
+        return;
+      }
+      const hash = computeBagBuildHash(bag);
+      const buildOutputDir = buildOutputDirs[hash];
+      if (!buildOutputDir) {
+        return;
+      }
+      const dotDomain = compileBlockParam(block, "domain");
+      const awsStaticHosting = {
+        Type: AWS_CLOUDFRONT_STATIC_HOSTING,
+        Name: bag.Name,
+        Value: {
+          name_prefix: [`${bag.Name}-`],
+          root_object: block.root_object,
+          region: block.region || os.getenv("AWS_REGION") || "us-east-1",
+          build_dir: buildOutputDir,
+          domain: asBlock([{
+            certificate_domain_to_create: dotDomain.name,
+            ...dotDomain
+          }])
+        }
+      };
+      const imports = [{
+        url: AWS_CLOUDFRONT_STATIC_HOSTING_URL,
+        copyFromContainer: ["default", "global_default", "cr_[terraform]"],
+        input: [awsStaticHosting]
+      }];
+      return { imports };
+    });
+    pipe.pushWithParams({ name: "export_results" }, (input) => {
+      return {
+        databags: iterateAllBlocks(input.previousStepResult, (d) => d)
+      };
+    });
+    return pipe;
   }
+  if (barbeLifecycleStep() === "pre_generate") {
+    autoCreateMultiplatformStateStore();
+  }
+  var buildPipeline = buildFrontendPipeline();
+  var pipes = [
+    buildPipeline,
+    ...iterateBlocksPerPlatform(container, staticHostingGcp, staticHostingAws)
+  ];
+  var awsCount = 0;
+  var gcpCount = 0;
+  iterateBlocksPerPlatform(container, () => gcpCount++, () => awsCount++);
+  if (container["cr_[terraform]"] && gcpCount === 0) {
+    pipes.push(pipeline([
+      step(() => ({
+        imports: [{
+          url: GCP_CLOUDRUN_STATIC_HOSTING_URL,
+          copyFromContainer: ["default", "global_default", "cr_[terraform]"],
+          input: []
+        }]
+      }))
+    ]));
+  }
+  if (container["cr_[terraform]"] && awsCount === 0) {
+    pipes.push(pipeline([
+      step(() => ({
+        imports: [{
+          url: AWS_CLOUDFRONT_STATIC_HOSTING_URL,
+          copyFromContainer: ["default", "global_default", "cr_[terraform]"],
+          input: []
+        }]
+      }))
+    ]));
+  }
+  executePipelineGroup(container, pipes);
 })();
 /*! Bundled license information:
 

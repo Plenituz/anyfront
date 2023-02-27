@@ -644,6 +644,15 @@
     }
     return output;
   }
+  function databagArrayToContainer(array) {
+    let output = {};
+    for (const bag of array) {
+      output[bag.Type] = output[bag.Type] || {};
+      output[bag.Type][bag.Name] = output[bag.Type][bag.Name] || [];
+      output[bag.Type][bag.Name].push(bag);
+    }
+    return output;
+  }
   function addToStepOutput(original, ...outputs) {
     for (const output of outputs) {
       if (output.imports) {
@@ -728,6 +737,7 @@
       }
       if (stepDatabags.length > 0) {
         exportDatabags(stepDatabags);
+        stepResults = mergeDatabagContainers(stepResults, databagArrayToContainer(stepDatabags));
       }
       if (IS_VERBOSE) {
         console.log(`step ${i} output:`, JSON.stringify(stepResults));
@@ -737,6 +747,12 @@
         stepNames
       });
       previousStepResult = stepResults;
+      for (let pipeline2 of pipelines) {
+        pipeline2.mostRecentInput = {
+          previousStepResult,
+          history
+        };
+      }
     }
   }
   function getHistoryItem(history, stepName) {
@@ -765,6 +781,13 @@
       },
       merge(...steps2) {
         this.steps.push(...steps2);
+      },
+      runAfter(other) {
+        this.steps = [
+          ...Array.from({ length: other.steps.length }, () => step(() => {
+          }, { name: `padding_${other.name || ""}` })),
+          ...this.steps
+        ];
       }
     };
   }

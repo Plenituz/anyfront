@@ -1,4 +1,4 @@
-# GCP Next.js example
+# GCP Docusaurus example
 
 The only Anyfront-related file in this folder is `infra.hcl`.
 

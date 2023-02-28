@@ -4,6 +4,7 @@ template {
 
 default {
     name_prefix = "anyfront-${replace(env.DOMAIN, ".", "-")}-"
+    project_id = env.PROJECT_ID
 }
 
 state_store {

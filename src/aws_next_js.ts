@@ -38,6 +38,11 @@ function awsNextJs(bag: Databag): Pipeline {
         //this is there altho probably shouldnt be overriden because of how specific we need the
         //next build output to be
         const buildCmd = asStr(dotBuild.build_cmd || 'npx --yes open-next@latest build')
+        let pnpmInstall = ''
+        const statPnpm = statFile(`${appDir}/pnpm-lock.yaml`)
+        if(!isFailure(statPnpm) && !statPnpm.result.isDir) {
+            pnpmInstall = asStr(dotBuild.pnpm_install_cmd || 'npm install -g pnpm')
+        }
         return {
             Type: 'buildkit_run_in_container',
             Name: `aws_next_js_${bag.Name}`,
@@ -52,7 +57,8 @@ function awsNextJs(bag: Databag): Pipeline {
                     FROM node:${nodeJsVersion}${nodeJsVersionTag}
 
                     RUN apt-get update
-                    RUN apt-get install -y zip
+                    RUN apt-get install -y zip wget
+                    ${pnpmInstall ? `RUN ${pnpmInstall}` : ''}
 
                     COPY --from=src ${appDir} /src
                     WORKDIR /src

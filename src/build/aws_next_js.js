@@ -1169,6 +1169,11 @@
       const nodeJsVersionTag = asStr(dotBuild.nodejs_version_tag || block.nodejs_version_tag || "-slim");
       const appDir = asStr(dotBuild.app_dir || block.app_dir || ".");
       const buildCmd = asStr(dotBuild.build_cmd || "npx --yes open-next@latest build");
+      let pnpmInstall = "";
+      const statPnpm = statFile(`${appDir}/pnpm-lock.yaml`);
+      if (!isFailure(statPnpm) && !statPnpm.result.isDir) {
+        pnpmInstall = asStr(dotBuild.pnpm_install_cmd || "npm install -g pnpm");
+      }
       return {
         Type: "buildkit_run_in_container",
         Name: `aws_next_js_${bag.Name}`,
@@ -1183,7 +1188,8 @@
                     FROM node:${nodeJsVersion}${nodeJsVersionTag}
 
                     RUN apt-get update
-                    RUN apt-get install -y zip
+                    RUN apt-get install -y zip wget
+                    ${pnpmInstall ? `RUN ${pnpmInstall}` : ""}
 
                     COPY --from=src ${appDir} /src
                     WORKDIR /src

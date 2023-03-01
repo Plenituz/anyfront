@@ -1,16 +1,18 @@
-# aws_next_js
+# aws_sveltekit
 
-This module builds and deploys a Next.js application on AWS
+This module builds and deploys a SvelteKit application on AWS
 
-> For Next.js static websites generated using `next build && next export`, see [static_hosting](./static_hosting.md) for a cheaper and faster hosting
+> For Svelte single page apps, or statically generated SvelteKit apps see [static_hosting](./static_hosting.md) for a cheaper and faster hosting
+
+> Anyfront will override any `adapter` you have configured in your `svelte.config.js` file, but you do need a `svelte.config.js` file in your project root
 
 ---
 
 ### Example usage
 
-#### A Next.js application on AWS
+#### A SvelteKit application on AWS
 ```hcl
-aws_next_js "my-site" {
+aws_sveltekit "my-site" {
     domain {
         # the domain name you want the app to be under
         name = "my-next-app.example.com"
@@ -28,7 +30,7 @@ aws_next_js "my-site" {
 
 `region`: (Optional, string) The region in which the origin will be. Defaults to `us-east-1`
 
-`app_dir`: (Optional, string) The directory containing the Next.js application. Defaults to the current directory. This is a shorthand for `build.app_dir`
+`app_dir`: (Optional, string) The directory containing the SvelteKit application. Defaults to the current directory. This is a shorthand for `build.app_dir`
 
 `nodejs_version`: (Optional, string) The version of Node.js to use to build and serve the application. The Node.js version selected must be supported by Lambda@Edge. Defaults to `16`. This is a shorthand for `build.nodejs_version`
 
@@ -50,10 +52,9 @@ aws_next_js "my-site" {
 
 &nbsp;&nbsp;&nbsp;&nbsp;`build_cmd`: (Optional, string) The command to run to build your application. Defaults to `npm run build`
 
-&nbsp;&nbsp;&nbsp;&nbsp;`build_output_dir`: (Optional, string) The path to the folder containing the files to upload. If not provided, anyfront will try to detect it automatically by looking at which files get created when running `build_cmd`
-
 &nbsp;&nbsp;&nbsp;&nbsp;`nodejs_version`: (Optional, string) The version of Node.js to use to build and serve the application. The Node.js version selected must be supported by Lambda@Edge. Defaults to `16`. Overrides `nodejs_version` on the parent block
 
+&nbsp;&nbsp;&nbsp;&nbsp;`nodejs_version_tag`: (Optional, string) The tag of the Node.js docker image to use to build the application. Defaults to `-slim`. Overrides `nodejs_version_tag` on the parent block
 ---
 
 `domain` block attributes:

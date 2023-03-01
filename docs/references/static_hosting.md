@@ -8,12 +8,6 @@ This block works out of the box for all frameworks that:
 
 For both these scenarios, doing a request directly to `/abc/index.html` or `/abc.html`, or any other file that actually exists (javascript, images, etc) will also work
 
-This block handles:
-- Building your application
-- Creating infrastructure for global CDN delivery
-- Uploading your files to the cloud, invalidating the CDN
-
-
 This is a multiplatform block, it currently supports:
 - AWS
 - GCP
@@ -21,7 +15,7 @@ This is a multiplatform block, it currently supports:
 Notes:
 - Not providing a domain name on GCP will make your site HTTP only
 - There is currently a bug where when running the `destroy` command, static_hosting blocks with the platform GCP do not get deleted
-- The current AWS implementation requires a Cloudfront update for each deployment, which take several minutes, this cost is for a slight decrease in cache miss request time
+- The current AWS implementation requires a Cloudfront update for each deployment, which take several minutes, but decreases the cache miss request time
 
 ---
 

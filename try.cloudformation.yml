@@ -8,10 +8,10 @@ Description: 'This stack creates a CodeBuild project that deploys a front end pr
 Parameters:
   GitUrl:
     Type: String
-    Description: URL of the git repository containing a front end project to deploy
+    Description: URL of the git repository containing your front end project to deploy
   DomainName:
     Type: String
-    Description: Domain name to use for the application, you must have a hosted zone in Route53 for this domain
+    Description: Domain name to use for the application, make sure you have a hosted zone in Route53 for this domain
 
 
 Resources:

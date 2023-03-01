@@ -1,10 +1,9 @@
-import { barbeLifecycleStep, readDatabagContainer, statFile, barbeOutputDir, iterateBlocks, asStr, Databag, SyntaxToken, asSyntax, asVal, exportDatabags, isSimpleTemplate, throwStatement, IS_VERBOSE } from '../../barbe-serverless/src/barbe-std/utils';
+import { readDatabagContainer, statFile, barbeOutputDir, iterateBlocks, asStr, Databag, SyntaxToken, exportDatabags, isSimpleTemplate, throwStatement, IS_VERBOSE } from '../../barbe-serverless/src/barbe-std/utils';
 import * as _ from '../../barbe-serverless/src/barbe-std/spidermonkey-globals';
 import { isFailure } from '../../barbe-serverless/src/barbe-std/rpc';
 import { ANYFRONT, STATIC_HOSTING, STATIC_HOSTING_URL, AWS_NEXT_JS, AWS_NEXT_JS_URL, GCP_NEXT_JS_URL, GCP_NEXT_JS, AWS_SVELTEKIT, AWS_SVELTEKIT_URL } from './anyfront-lib/consts';
 import { applyDefaults, DatabagObjVal, compileBlockParam } from '../../barbe-serverless/src/barbe-sls-lib/lib';
 import { Pipeline, executePipelineGroup, Step, step, pipeline } from './anyfront-lib/pipeline';
-import { autoDeleteMissing2 } from './anyfront-lib/lib';
 
 const container = readDatabagContainer()
 

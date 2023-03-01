@@ -2,6 +2,8 @@
 
 This module builds and deploys a Next.js application on GCP
 
+> If a `project_id` is not provided, a new project will be created automatically based on `name_prefix` and the name of the `gcp_next_js` block
+
 > For Next.js static websites generated using `next build && next export`, see [static_hosting](./static_hosting.md) for a cheaper and faster hosting
 
 ---
@@ -62,6 +64,8 @@ gcp_next_js "my-site" {
 `app_dir`: (Optional, string) The directory containing the Next.js application. Defaults to the current directory. This is a shorthand for `build.app_dir`
 
 `nodejs_version`: (Optional, string) The version of Node.js to use to build and serve the application. Defaults to `16`. This is a shorthand for `build.nodejs_version`
+
+`nodejs_version_tag`: (Optional, string) The tag of the Node.js docker image to use to build the application. Defaults to `-slim`. This is a shorthand for `build.nodejs_version_tag`
 
 `build`: (Optional, block) Block to configure the building of your application
 

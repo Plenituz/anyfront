@@ -273,8 +273,8 @@
   var GCP_NEXT_JS = "gcp_next_js";
   var AWS_SVELTEKIT = "aws_sveltekit";
   var ANYFRONT = "anyfront";
-  var BARBE_SLS_VERSION = "v0.2.2";
-  var ANYFRONT_VERSION = "v0.2.2";
+  var BARBE_SLS_VERSION = "v0.2.3";
+  var ANYFRONT_VERSION = "v0.2.3";
   var TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute.js:${BARBE_SLS_VERSION}`;
   var AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam.js:${BARBE_SLS_VERSION}`;
   var AWS_LAMBDA_URL = `https://hub.barbe.app/barbe-serverless/aws_function.js:${BARBE_SLS_VERSION}`;

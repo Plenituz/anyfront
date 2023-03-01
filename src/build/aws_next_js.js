@@ -620,8 +620,8 @@
   // anyfront-lib/consts.ts
   var AWS_S3_SYNC_FILES = "aws_s3_sync_files";
   var AWS_NEXT_JS = "aws_next_js";
-  var BARBE_SLS_VERSION = "v0.2.2";
-  var ANYFRONT_VERSION = "v0.2.2";
+  var BARBE_SLS_VERSION = "v0.2.3";
+  var ANYFRONT_VERSION = "v0.2.3";
   var TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute.js:${BARBE_SLS_VERSION}`;
   var AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam.js:${BARBE_SLS_VERSION}`;
   var AWS_LAMBDA_URL = `https://hub.barbe.app/barbe-serverless/aws_function.js:${BARBE_SLS_VERSION}`;
@@ -996,7 +996,7 @@
   // ../../barbe-serverless/src/barbe-sls-lib/consts.ts
   var AWS_FUNCTION = "aws_function";
   var AWS_IAM_LAMBDA_ROLE = "aws_iam_lambda_role";
-  var BARBE_SLS_VERSION2 = "v0.2.2";
+  var BARBE_SLS_VERSION2 = "v0.2.3";
   var TERRAFORM_EXECUTE_URL2 = `barbe-serverless/terraform_execute.js:${BARBE_SLS_VERSION2}`;
   var AWS_NETWORK_URL = `barbe-serverless/aws_network.js:${BARBE_SLS_VERSION2}`;
 

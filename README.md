@@ -14,8 +14,7 @@ Anyfront simplifies deploying web applications on AWS and GCP
 
 Deploy from your terminal
 ```bash
-curl -fsSL https://hub.barbe.app/install.sh -o install-barbe.sh
-sh install-barbe.sh
+curl -fsSL https://hub.barbe.app/install.sh | sh -
 
 # deploy to AWS
 cd /path/to/project

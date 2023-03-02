@@ -35,7 +35,7 @@ You can use the zero configuration deployment if
 If your project meets these requirements, you can deploy it with a single command:
 ```bash
 # install barbe if not already installed
-curl -fsSL https://hub.barbe.app/install.sh -o install-barbe.sh
+curl -fsSL https://hub.barbe.app/install.sh | sh -
 sh install-barbe.sh
 
 # cd to the root of your project

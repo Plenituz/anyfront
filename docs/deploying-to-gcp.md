@@ -84,6 +84,9 @@ You just reproduced the zero configuration deployment, except this time a GCP pr
 
 Your deployment commands now become
 ```bash
+# install barbe if not already installed
+curl -fsSL https://hub.barbe.app/install.sh | sh -
+
 # deploy you app
 sudo barbe apply infra.hcl
 

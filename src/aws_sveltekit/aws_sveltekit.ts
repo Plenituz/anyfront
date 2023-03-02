@@ -36,6 +36,16 @@ function awsSveltekit(bag: Databag): Pipeline[] {
         const appDir = asStr(dotBuild.app_dir || block.app_dir || '.')
         const installCmd = asStr(dotBuild.install_cmd || 'npm install')
         const buildCmd = asStr(dotBuild.build_cmd || 'npm run build')
+        let svelteConfigJs = os.file.readFile(`${appDir}/svelte.config.js`)
+        svelteConfigJs = svelteConfigJs.replace('export default ', 'const customer_svelteConfig = ')
+        svelteConfigJs += `
+        import __barbe_adapter from '@yarbsemaj/adapter-lambda'
+        if(!customer_svelteConfig.kit) customer_svelteConfig.kit = {}
+        customer_svelteConfig.kit.adapter = __barbe_adapter()
+        if(!customer_svelteConfig.kit.csrf) customer_svelteConfig.kit.csrf = {}
+        customer_svelteConfig.kit.csrf.checkOrigin = false
+        export default customer_svelteConfig
+        `
         return {
             Type: 'buildkit_run_in_container',
             Name: `aws_sveltekit_${bag.Name}`,
@@ -62,8 +72,8 @@ function awsSveltekit(bag: Databag): Pipeline[] {
 
                     RUN ${installCmd}
                     RUN npm install -D @yarbsemaj/adapter-lambda
-                    RUN mv svelte.config.js customer_svelte.config.js
                     COPY --from=src svelte.config.js svelte.config.js
+                    RUN npx svelte-kit sync
                     RUN ${buildCmd}
 
                     RUN mkdir -p __barbe_next/static

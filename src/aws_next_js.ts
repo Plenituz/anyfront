@@ -488,6 +488,7 @@ function awsNextJs(bag: Databag): Pipeline {
                     bucket_name: bucketName,
                     delete: true,
                     dir: `${outputDir}/aws_next_js_${bag.Name}/assets`,
+                    cache_control: 'max-age=31536000',
                     blob: '.'
                 }
             }]

@@ -14,6 +14,7 @@ function awsS3SyncFilesIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] 
         throw new Error('couldn\'t find AWS credentials')
     }
     const deleteArg = block.delete && asVal(block.delete) ? ' --delete' : ''
+    const cacheControl = block.cache_control ? ` --cache-control "${asStr(block.cache_control)}"` : ''
 
     return [{
         Type: 'buildkit_run_in_container',
@@ -33,7 +34,7 @@ function awsS3SyncFilesIterator(bag: Databag): (Databag | SugarCoatedDatabag)[] 
                 COPY --from=src ./${asStr(block.dir || '')} /src
                 WORKDIR /src
 
-                RUN aws s3 sync ${asStr(block.blob || '.')} s3://${asStr(block.bucket_name || '')}${deleteArg}`
+                RUN aws s3 sync ${asStr(block.blob || '.')} s3://${asStr(block.bucket_name || '')}${deleteArg}${cacheControl}`
         }
     }]
 }

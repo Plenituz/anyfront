@@ -195,7 +195,7 @@
   // anyfront-lib/consts.ts
   var AWS_S3_SYNC_FILES = "aws_s3_sync_files";
   var BARBE_SLS_VERSION = "v0.2.3";
-  var ANYFRONT_VERSION = "v0.2.4";
+  var ANYFRONT_VERSION = "v0.2.5";
   var TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute.js:${BARBE_SLS_VERSION}`;
   var AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam.js:${BARBE_SLS_VERSION}`;
   var AWS_LAMBDA_URL = `https://hub.barbe.app/barbe-serverless/aws_function.js:${BARBE_SLS_VERSION}`;
@@ -318,6 +318,7 @@
       throw new Error("couldn't find AWS credentials");
     }
     const deleteArg = block.delete && asVal(block.delete) ? " --delete" : "";
+    const cacheControl = block.cache_control ? ` --cache-control "${asStr(block.cache_control)}"` : "";
     return [{
       Type: "buildkit_run_in_container",
       Name: `aws_s3_sync_${bag.Name}`,
@@ -336,7 +337,7 @@
                 COPY --from=src ./${asStr(block.dir || "")} /src
                 WORKDIR /src
 
-                RUN aws s3 sync ${asStr(block.blob || ".")} s3://${asStr(block.bucket_name || "")}${deleteArg}`
+                RUN aws s3 sync ${asStr(block.blob || ".")} s3://${asStr(block.bucket_name || "")}${deleteArg}${cacheControl}`
       }
     }];
   }

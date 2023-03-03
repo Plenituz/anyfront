@@ -318,6 +318,7 @@ const applyIterator2 = (terraformExecuteResults: DatabagContainer) => (bag: Data
                     bucket_name: bucketName,
                     delete: true,
                     dir: asStr(block.build_dir!),
+                    cache_control: 'max-age=31536000',
                     blob: '.'
                 }
             }]

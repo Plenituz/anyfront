@@ -621,7 +621,7 @@
   var AWS_S3_SYNC_FILES = "aws_s3_sync_files";
   var AWS_NEXT_JS = "aws_next_js";
   var BARBE_SLS_VERSION = "v0.2.3";
-  var ANYFRONT_VERSION = "v0.2.4";
+  var ANYFRONT_VERSION = "v0.2.5";
   var TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute.js:${BARBE_SLS_VERSION}`;
   var AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam.js:${BARBE_SLS_VERSION}`;
   var AWS_LAMBDA_URL = `https://hub.barbe.app/barbe-serverless/aws_function.js:${BARBE_SLS_VERSION}`;
@@ -1607,6 +1607,7 @@
             bucket_name: bucketName,
             delete: true,
             dir: `${outputDir}/aws_next_js_${bag.Name}/assets`,
+            cache_control: "max-age=31536000",
             blob: "."
           }
         }]

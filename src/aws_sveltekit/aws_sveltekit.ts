@@ -397,7 +397,7 @@ function awsSveltekit(bag: Databag): Pipeline[] {
                     delete: true,
                     dir: `${outputDir}/${dir}/static`,
                     blob: '.',
-                    //TODO cache control headers
+                    cache_control: 'max-age=31536000',
                 }
             }]
         }]

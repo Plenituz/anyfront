@@ -12,7 +12,7 @@ export const ANYFRONT = 'anyfront'
 
 
 const BARBE_SLS_VERSION = 'v0.2.3'
-const ANYFRONT_VERSION = 'v0.2.4'
+const ANYFRONT_VERSION = 'v0.2.5'
 
 export const TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute.js:${BARBE_SLS_VERSION}`
 export const AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam.js:${BARBE_SLS_VERSION}`

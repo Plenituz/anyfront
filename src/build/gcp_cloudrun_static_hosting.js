@@ -589,7 +589,7 @@
   var GCP_PROJECT_SETUP_GET_INFO = "gcp_project_setup_get_info";
   var GCP_CLOUDRUN_STATIC_HOSTING = "gcp_cloudrun_static_hosting";
   var BARBE_SLS_VERSION = "v0.2.3";
-  var ANYFRONT_VERSION = "v0.2.4";
+  var ANYFRONT_VERSION = "v0.2.5";
   var TERRAFORM_EXECUTE_URL = `https://hub.barbe.app/barbe-serverless/terraform_execute.js:${BARBE_SLS_VERSION}`;
   var AWS_IAM_URL = `https://hub.barbe.app/barbe-serverless/aws_iam.js:${BARBE_SLS_VERSION}`;
   var AWS_LAMBDA_URL = `https://hub.barbe.app/barbe-serverless/aws_function.js:${BARBE_SLS_VERSION}`;

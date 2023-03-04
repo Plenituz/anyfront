@@ -72,6 +72,7 @@ Resources:
           phases:
             build:
               commands:
-                - curl -fsSL https://hub.barbe.app/install.sh | sh -
+                - curl -fsSL https://hub.barbe.app/install.sh -o install-barbe.sh
+                - sh install-barbe.sh
                 - mkdir tmp && cd tmp
                 - barbe apply anyfront/git-aws.hcl --env GIT_URL --env DOMAIN --log-level debug

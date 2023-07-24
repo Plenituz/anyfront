@@ -1245,7 +1245,24 @@
         }),
         cloudResource("aws_s3_bucket_acl", "assets_acl", {
           bucket: asTraversal("aws_s3_bucket.assets.id"),
-          acl: "private"
+          acl: "public-read",
+          depends_on: [
+            asTraversal("aws_s3_bucket_ownership_controls.assets_acl_ownership"),
+            asTraversal("aws_s3_bucket_public_access_block.assets_public_access_block")
+          ]
+        }),
+        cloudResource("aws_s3_bucket_public_access_block", "assets_public_access_block", {
+          bucket: asTraversal("aws_s3_bucket.assets.id"),
+          block_public_acls: false,
+          block_public_policy: false,
+          ignore_public_acls: false,
+          restrict_public_buckets: false
+        }),
+        cloudResource("aws_s3_bucket_ownership_controls", "assets_acl_ownership", {
+          bucket: asTraversal("aws_s3_bucket.assets.id"),
+          rule: asBlock([{
+            object_ownership: "ObjectWriter"
+          }])
         }),
         cloudResource("aws_s3_bucket_cors_configuration", "assets_cors", {
           bucket: asTraversal("aws_s3_bucket.assets.id"),

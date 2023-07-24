@@ -66,10 +66,10 @@ function generateIterator1(bag: Databag): DBAndImport[] {
             cloudOutput('', 'static_hosting_s3_bucket', {
                 value: asTraversal('aws_s3_bucket.origin.id')
             }),
-            cloudResource('aws_s3_bucket_acl', 'origin_acl', {
-                bucket: asTraversal('aws_s3_bucket.origin.id'),
-                acl: 'private'
-            }),
+            // cloudResource('aws_s3_bucket_acl', 'origin_acl', {
+            //     bucket: asTraversal('aws_s3_bucket.origin.id'),
+            //     acl: 'private'
+            // }),
             cloudResource('aws_s3_bucket_cors_configuration', 'origin_cors', {
                 bucket: asTraversal('aws_s3_bucket.origin.id'),
                 cors_rule: asBlock([{

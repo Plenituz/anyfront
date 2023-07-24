@@ -56,7 +56,7 @@ function awsNextJs(bag: Databag): Pipeline {
                 dockerfile: `
                     FROM node:${nodeJsVersion}${nodeJsVersionTag}
 
-                    RUN apt-get update
+                    RUN apt-get update && apt-get install -y apt-transport-https
                     RUN apt-get install -y zip wget
                     ${pnpmInstall ? `RUN ${pnpmInstall}` : ''}
 
@@ -123,10 +123,10 @@ function awsNextJs(bag: Databag): Pipeline {
             cloudOutput('', 'assets_s3_bucket', {
                 value: asTraversal('aws_s3_bucket.assets.id'),
             }),
-            cloudResource('aws_s3_bucket_acl', 'assets_acl', {
-                bucket: asTraversal('aws_s3_bucket.assets.id'),
-                acl: 'private'
-            }),
+            // cloudResource('aws_s3_bucket_acl', 'assets_acl', {
+            //     bucket: asTraversal('aws_s3_bucket.assets.id'),
+            //     acl: 'private'
+            // }),
             cloudResource('aws_s3_bucket_cors_configuration', 'assets_cors', {
                 bucket: asTraversal('aws_s3_bucket.assets.id'),
                 cors_rule: asBlock([{

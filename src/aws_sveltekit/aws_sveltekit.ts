@@ -18,7 +18,7 @@ function awsSveltekit(bag: Databag): Pipeline[] {
     const pipe = pipeline([], { name: `aws_sveltekit.${bag.Name}` })
     const dotBuild = compileBlockParam(block, 'build')
     const dotDomain = compileBlockParam(block, 'domain')
-    const nodeJsVersion = asStr(dotBuild.nodejs_version || block.nodejs_version || '16')
+    const nodeJsVersion = asStr(dotBuild.nodejs_version || block.nodejs_version || '18')
 
     const dir = `aws_sveltekit_${bag.Name}`
     const bagPreconf = {
@@ -358,7 +358,11 @@ function awsSveltekit(bag: Databag): Pipeline[] {
             }
         ]
         if(!(dotBuild.disabled && asVal(dotBuild.disabled))) {
-            transforms.push(sveltekitBuild())
+            try {
+                transforms.push(sveltekitBuild())
+            } catch(e) {
+                console.log('sveltekitBuild failed', e)
+            }
         }
         return { databags, imports, transforms }
     })

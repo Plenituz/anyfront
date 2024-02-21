@@ -104,6 +104,8 @@ function awsSveltekit(bag: Databag): Pipeline[] {
             cloudData,
             cloudResource,
         })
+        let originRequestRef: SyntaxToken
+        let cachePolicyRef: SyntaxToken
         let databags: SugarCoatedDatabag[] = [
             cloudProvider('', 'aws', {
                 region: block.region || os.getenv('AWS_REGION') || 'us-east-1',
@@ -182,31 +184,71 @@ function awsSveltekit(bag: Databag): Pipeline[] {
             cloudOutput('', 'cf_distrib', {
                 value: asTraversal('aws_cloudfront_distribution.distribution.id'),
             }),
-            cloudResource('aws_cloudfront_cache_policy', 'default_cache_policy', {
-                name: appendToTemplate(namePrefix, [`${bag.Name}-default-cache-policy`]),
-                default_ttl: 0,
-                max_ttl: 31536000, // that's 365 days
-                min_ttl: 0,
-                parameters_in_cache_key_and_forwarded_to_origin: asBlock([{
-                    enable_accept_encoding_brotli: true,
-                    enable_accept_encoding_gzip: true,
-                    cookies_config: asBlock([{
-                        cookie_behavior: "all"
-                    }]),
-                    headers_config: asBlock([{
-                        header_behavior: "none",
-                    }]),
-                    query_strings_config: asBlock([{
-                        query_string_behavior: "all"
-                    }])
-                }])
-            }),
-            cloudData("aws_cloudfront_origin_request_policy", "s3_cors", {
-                name: "Managed-CORS-S3Origin",
-            }),
-            cloudData("aws_cloudfront_cache_policy", "caching_optimized", {
-                name: "Managed-CachingOptimized",
-            }),
+            ...((): Databag[] => {
+                if(!block.include_headers) {
+                    cachePolicyRef = asTraversal("data.aws_cloudfront_cache_policy.caching_optimized.id")
+                    originRequestRef = asTraversal("data.aws_cloudfront_origin_request_policy.s3_cors.id")
+                    return [
+                        cloudData("aws_cloudfront_origin_request_policy", "s3_cors", {
+                            name: "Managed-CORS-S3Origin",
+                        }),
+                        cloudData("aws_cloudfront_cache_policy", "caching_optimized", {
+                            name: "Managed-CachingOptimized",
+                        })
+                    ]
+                }
+                cachePolicyRef = asTraversal("aws_cloudfront_cache_policy.custom_cache_policy.id")
+                originRequestRef = asTraversal("aws_cloudfront_origin_request_policy.custom_headers.id")
+                return [
+                    cloudResource('aws_cloudfront_origin_request_policy', 'custom_headers', {
+                        name: appendToTemplate(namePrefix, [`${bag.Name}-custom-headers-policy`]),
+                        headers_config: asBlock([{
+                            header_behavior: "whitelist",
+                            headers: asBlock([{
+                                items: [
+                                    'origin',
+                                    'access-control-request-headers',
+                                    'access-control-request-method',
+                                    ...asValArrayConst(block.include_headers)
+                                ]
+                            }])
+                        }]),
+                        query_strings_config: asBlock([{
+                            query_string_behavior: "none"
+                        }]),
+                        cookies_config: asBlock([{
+                            cookie_behavior: "none"
+                        }])
+                    }),
+                    cloudResource('aws_cloudfront_cache_policy', 'custom_cache_policy', {
+                        name: appendToTemplate(namePrefix, [`${bag.Name}-custom-header-cache-policy`]),
+                        default_ttl: 86400,
+                        max_ttl: 31536000,
+                        min_ttl: 1,
+                        parameters_in_cache_key_and_forwarded_to_origin: asBlock([{
+                            enable_accept_encoding_brotli: true,
+                            enable_accept_encoding_gzip: true,
+                            cookies_config: asBlock([{
+                                cookie_behavior: "none"
+                            }]),
+                            headers_config: asBlock([{
+                                header_behavior: "whitelist",
+                                headers: asBlock([{
+                                    items: [
+                                        'origin',
+                                        'access-control-request-headers',
+                                        'access-control-request-method',
+                                        ...asValArrayConst(block.include_headers)
+                                    ]
+                                }])
+                            }]),
+                            query_strings_config: asBlock([{
+                                query_string_behavior: "none"
+                            }])
+                        }])
+                    })
+                ]
+            })(),
             cloudResource('aws_cloudfront_distribution', 'distribution', {
                 enabled: true,
                 is_ipv6_enabled: true,
@@ -262,8 +304,8 @@ function awsSveltekit(bag: Databag): Pipeline[] {
                     target_origin_id: "server",
                     compress: true,
     
-                    cache_policy_id: asTraversal("data.aws_cloudfront_cache_policy.caching_optimized.id"),
-                    origin_request_policy_id: asTraversal("data.aws_cloudfront_origin_request_policy.s3_cors.id"),
+                    cache_policy_id: cachePolicyRef,
+                    origin_request_policy_id: originRequestRef,
 
                     lambda_function_association: asBlock([{
                         event_type: "origin-request",

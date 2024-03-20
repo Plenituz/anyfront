@@ -71,7 +71,7 @@ function awsSveltekit(bag: Databag): Pipeline[] {
                     WORKDIR /src
 
                     RUN ${installCmd}
-                    RUN npm install -D @yarbsemaj/adapter-lambda
+                    RUN npm install -D @yarbsemaj/adapter-lambda --force
                     COPY --from=src svelte.config.js svelte.config.js
                     RUN npx svelte-kit sync
                     RUN ${buildCmd}

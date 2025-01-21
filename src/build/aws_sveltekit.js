@@ -1166,6 +1166,7 @@
       const appDir = asStr(dotBuild.app_dir || block.app_dir || ".");
       const installCmd = asStr(dotBuild.install_cmd || "npm install");
       const buildCmd = asStr(dotBuild.build_cmd || "npm run build");
+      const preInstallInstructions = asStr(dotBuild.pre_install_instructions || "");
       let svelteConfigJs = os.file.readFile(`${appDir}/svelte.config.js`);
       svelteConfigJs = svelteConfigJs.replace("export default ", "const customer_svelteConfig = ");
       svelteConfigJs += `
@@ -1200,6 +1201,7 @@
                     COPY --from=src ${appDir} /src
                     WORKDIR /src
 
+                    ${preInstallInstructions}
                     RUN ${installCmd}
                     RUN npm install -D @yarbsemaj/adapter-lambda --force
                     COPY --from=src svelte.config.js svelte.config.js
@@ -1431,6 +1433,7 @@
             compress: true,
             cache_policy_id: cachePolicyRef,
             origin_request_policy_id: originRequestRef,
+            response_headers_policy_id: block.response_headers_policy_id ? block.response_headers_policy_id : void 0,
             lambda_function_association: asBlock([{
               event_type: "origin-request",
               lambda_arn: asTraversal("aws_function.origin-request.qualified_arn"),

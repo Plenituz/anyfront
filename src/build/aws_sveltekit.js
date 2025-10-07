@@ -1166,6 +1166,7 @@
       const appDir = asStr(dotBuild.app_dir || block.app_dir || ".");
       const installCmd = asStr(dotBuild.install_cmd || "npm install");
       const buildCmd = asStr(dotBuild.build_cmd || "npm run build");
+      const adapterCmd = asStr(dotBuild.adapter_cmd || "npm install -D @yarbsemaj/adapter-lambda --force");
       const preInstallInstructions = asStr(dotBuild.pre_install_instructions || "");
       let svelteConfigJs = os.file.readFile(`${appDir}/svelte.config.js`);
       svelteConfigJs = svelteConfigJs.replace("export default ", "const customer_svelteConfig = ");
@@ -1198,25 +1199,25 @@
                     RUN apt-get update
                     RUN apt-get install -y zip
 
-                    COPY --from=src ${appDir} /src
-                    WORKDIR /src
+                    COPY --from=src . /src
+                    WORKDIR /src/${appDir}
 
                     ${preInstallInstructions}
                     RUN ${installCmd}
-                    RUN npm install -D @yarbsemaj/adapter-lambda --force
+                    RUN ${adapterCmd}
                     COPY --from=src svelte.config.js svelte.config.js
                     RUN npx svelte-kit sync
                     RUN ${buildCmd}
 
                     RUN mkdir -p __barbe_next/static
-                    RUN cd build/server && zip -ryq1 /src/__barbe_next/server.zip .
+                    RUN cd build/server && zip -ryq1 /src/${appDir}/__barbe_next/server.zip .
                     # static.js is already baked into router.js
                     RUN rm build/edge/static.js
-                    RUN cd build/edge && zip -ryq1 /src/__barbe_next/edge.zip .
+                    RUN cd build/edge && zip -ryq1 /src/${appDir}/__barbe_next/edge.zip .
 
                     # these might fail if the directories are empty, hence the "|| true"
-                    RUN mv build/assets/* __barbe_next/static/. || true
-                    RUN mv build/prerendered/* __barbe_next/static/. || true
+                    RUN cp -r build/assets/. __barbe_next/static/ || true
+                    RUN cp -r build/prerendered/. __barbe_next/static/. || true
                 `,
           exported_files: {
             "__barbe_next/edge.zip": `${dir}/edge.zip`,
@@ -1316,7 +1317,7 @@
           value: asTraversal("aws_cloudfront_distribution.distribution.id")
         }),
         ...(() => {
-          if (!block.include_headers) {
+          if (!block.include_headers && !block.include_cookies) {
             cachePolicyRef = asTraversal("data.aws_cloudfront_cache_policy.caching_optimized.id");
             originRequestRef = asTraversal("data.aws_cloudfront_origin_request_policy.s3_cors.id");
             return [
@@ -1330,6 +1331,21 @@
           }
           cachePolicyRef = asTraversal("aws_cloudfront_cache_policy.custom_cache_policy.id");
           originRequestRef = asTraversal("aws_cloudfront_origin_request_policy.custom_headers.id");
+          let additionalHeaders = [];
+          if (block.include_headers) {
+            additionalHeaders = asValArrayConst(block.include_headers);
+          }
+          let cookieConfig = asBlock([{
+            cookie_behavior: "none"
+          }]);
+          if (block.include_cookies) {
+            cookieConfig = asBlock([{
+              cookie_behavior: "whitelist",
+              cookies: asBlock([{
+                items: asValArrayConst(block.include_cookies)
+              }])
+            }]);
+          }
           return [
             cloudResource("aws_cloudfront_origin_request_policy", "custom_headers", {
               name: appendToTemplate(namePrefix, [`${bag.Name}-custom-headers-policy`]),
@@ -1340,16 +1356,14 @@
                     "origin",
                     "access-control-request-headers",
                     "access-control-request-method",
-                    ...asValArrayConst(block.include_headers)
+                    ...additionalHeaders
                   ]
                 }])
               }]),
               query_strings_config: asBlock([{
                 query_string_behavior: "none"
               }]),
-              cookies_config: asBlock([{
-                cookie_behavior: "none"
-              }])
+              cookies_config: cookieConfig
             }),
             cloudResource("aws_cloudfront_cache_policy", "custom_cache_policy", {
               name: appendToTemplate(namePrefix, [`${bag.Name}-custom-header-cache-policy`]),
@@ -1359,9 +1373,7 @@
               parameters_in_cache_key_and_forwarded_to_origin: asBlock([{
                 enable_accept_encoding_brotli: true,
                 enable_accept_encoding_gzip: true,
-                cookies_config: asBlock([{
-                  cookie_behavior: "none"
-                }]),
+                cookies_config: cookieConfig,
                 headers_config: asBlock([{
                   header_behavior: "whitelist",
                   headers: asBlock([{
@@ -1369,7 +1381,7 @@
                       "origin",
                       "access-control-request-headers",
                       "access-control-request-method",
-                      ...asValArrayConst(block.include_headers)
+                      ...additionalHeaders
                     ]
                   }])
                 }]),
